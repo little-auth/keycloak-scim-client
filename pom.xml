@@ -22,7 +22,7 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
     <!-- Pinned to match keycloak-it's Keycloak image (quay.io/keycloak/keycloak:25.0.6),
-         our conformance-test target -- see .usefinal/plans/keycloak-scim-client-context.md -->
+         our conformance-test target; see .usefinal/plans/keycloak-scim-client-context.md -->
     <keycloak.version>25.0.6</keycloak.version>
     <scim-sdk.version>1.34.0</scim-sdk.version>
     <junit.version>5.11.0</junit.version>
@@ -30,7 +30,7 @@
   </properties>
 
   <dependencies>
-    <!-- Keycloak SPI surface -- provided by the server at runtime, never shaded in. -->
+    <!-- Keycloak SPI surface: provided by the server at runtime, never shaded in. -->
     <dependency>
       <groupId>org.keycloak</groupId>
       <artifactId>keycloak-server-spi</artifactId>
@@ -58,7 +58,7 @@
 
     <!-- SCIM 2.0 client wire format: request building, PATCH ops, RFC 7644 error/list
          parsing. Chosen over pingidentity/scim2-sdk for its direct precedent in this
-         ecosystem (mitodl/keycloak-scim) and lower Java baseline -- see context.md. -->
+         ecosystem (mitodl/keycloak-scim) and lower Java baseline; see context.md. -->
     <dependency>
       <groupId>de.captaingoldfish</groupId>
       <artifactId>scim-sdk-client</artifactId>
@@ -105,7 +105,7 @@
         <version>3.3.1</version>
       </plugin>
       <!-- Shades scim-sdk (and its transitive deps) into the provider jar Keycloak
-           loads -- Keycloak's own classpath must not need to provide it. -->
+           loads; Keycloak's own classpath must not need to provide it. -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-shade-plugin</artifactId>
