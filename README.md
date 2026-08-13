@@ -19,8 +19,15 @@ current build status.
 
 ## Build
 
+Requires JDK 17 (matching Keycloak 25.0.6's own build; a newer JDK breaks Mockito's
+bytecode instrumentation for the test suite). `.tool-versions` pins
+`temurin-17.0.20+8` via [asdf](https://asdf-vm.com/); `asdf install` fetches it,
+scoped to just this project.
+
 ```sh
-mvn clean package
+asdf install
+export JAVA_HOME="$(asdf where java)"
+./mvnw clean package
 ```
 
 Produces `target/keycloak-scim-client-<version>.jar`, dropped into Keycloak's
