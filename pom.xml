@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.littleauth.keycloak</groupId>
+  <artifactId>keycloak-scim-client</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <packaging>jar</packaging>
+
+  <name>keycloak-scim-client</name>
+  <description>
+    Keycloak SPI plugin: a full SCIM 2.0 client pushing/syncing Keycloak users and groups
+    to an external SCIM 2.0 service provider.
+  </description>
+  <url>https://github.com/little-auth/keycloak-scim-client</url>
+
+  <properties>
+    <maven.compiler.source>17</maven.compiler.source>
+    <maven.compiler.target>17</maven.compiler.target>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+    <!-- Pinned to match keycloak-it's Keycloak image (quay.io/keycloak/keycloak:25.0.6),
+         our conformance-test target -- see .usefinal/plans/keycloak-scim-client-context.md -->
+    <keycloak.version>25.0.6</keycloak.version>
+    <scim-sdk.version>1.34.0</scim-sdk.version>
+    <junit.version>5.11.0</junit.version>
+    <mockito.version>5.13.0</mockito.version>
+  </properties>
+
+  <dependencies>
+    <!-- Keycloak SPI surface -- provided by the server at runtime, never shaded in. -->
+    <dependency>
+      <groupId>org.keycloak</groupId>
+      <artifactId>keycloak-server-spi</artifactId>
+      <version>${keycloak.version}</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.keycloak</groupId>
+      <artifactId>keycloak-server-spi-private</artifactId>
+      <version>${keycloak.version}</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.keycloak</groupId>
+      <artifactId>keycloak-services</artifactId>
+      <version>${keycloak.version}</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.keycloak</groupId>
+      <artifactId>keycloak-core</artifactId>
+      <version>${keycloak.version}</version>
+      <scope>provided</scope>
+    </dependency>
+
+    <!-- SCIM 2.0 client wire format: request building, PATCH ops, RFC 7644 error/list
+         parsing. Chosen over pingidentity/scim2-sdk for its direct precedent in this
+         ecosystem (mitodl/keycloak-scim) and lower Java baseline -- see context.md. -->
+    <dependency>
+      <groupId>de.captaingoldfish</groupId>
+      <artifactId>scim-sdk-client</artifactId>
+      <version>${scim-sdk.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>de.captaingoldfish</groupId>
+      <artifactId>scim-sdk-common</artifactId>
+      <version>${scim-sdk.version}</version>
+    </dependency>
+
+    <!-- Test -->
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>${junit.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.mockito</groupId>
+      <artifactId>mockito-core</artifactId>
+      <version>${mockito.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.mockito</groupId>
+      <artifactId>mockito-junit-jupiter</artifactId>
+      <version>${mockito.version}</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <finalName>${project.artifactId}-${project.version}</finalName>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.13.0</version>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.3.1</version>
+      </plugin>
+      <!-- Shades scim-sdk (and its transitive deps) into the provider jar Keycloak
+           loads -- Keycloak's own classpath must not need to provide it. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-shade-plugin</artifactId>
+        <version>3.6.0</version>
+        <executions>
+          <execution>
+            <phase>package</phase>
+            <goals>
+              <goal>shade</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

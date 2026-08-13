@@ -1,0 +1,31 @@
+# keycloak-scim-client
+
+A Keycloak SPI plugin: a full SCIM 2.0 client that pushes and syncs Keycloak users and
+groups to an external SCIM 2.0 service provider (Users, Groups, PATCH-with-PUT-fallback,
+discovery-driven capability detection, periodic reconciliation), configured through a
+custom admin console tab rather than Keycloak's generic auto-generated provider form.
+
+Replaces [mitodl/keycloak-scim](https://github.com/mitodl/keycloak-scim) for our use with
+[scimitar](https://github.com/mario/scimitar)-based SCIM targets — see that project's
+`keycloak-it` harness for the conformance findings that shaped several decisions here
+(the DELETE-after-row-gone bug, the silent `emailVerified` gate, PATCH-off-by-default)
+and for the disposable SCIM server this project's own conformance tests point at.
+
+## Status
+
+Early, pre-alpha. See `.usefinal/plans/keycloak-scim-client-context.md` for the locked
+architecture decisions and `.usefinal/plans/keycloak-scim-client-implementation.md` for
+current build status.
+
+## Build
+
+```sh
+mvn clean package
+```
+
+Produces `target/keycloak-scim-client-<version>.jar`, dropped into Keycloak's
+`providers/` directory.
+
+## License
+
+Apache-2.0 — see `LICENSE`.
