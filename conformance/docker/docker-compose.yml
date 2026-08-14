@@ -10,13 +10,23 @@ services:
     environment:
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
-      # Keycloak's own SPI config env var convention is KC_SPI_<spi>_<provider-id>_<property>;
-      # the generic KC_VAULT_DIR isn't a real property name, which is why the vault
-      # silently degraded to echoing the raw key back as the "secret" instead of reading
-      # this file -- confirmed via a diagnostic HttpRequestInterceptor on the real
-      # outgoing request, not guessed.
-      KC_SPI_VAULT_FILES_PLAINTEXT_DIR: /opt/keycloak/data/vault
-      KC_SPI_VAULT_FILES_PLAINTEXT_KEY_RESOLVERS: KEY_ONLY
+      # `--vault=file` at build time (Dockerfile) only makes the file-vault provider
+      # available -- it must ALSO be selected again at runtime via `KC_VAULT`, or
+      # session.vault() silently returns Keycloak's no-op provider and every secret
+      # "resolves" to empty (confirmed live: identical `KC_SPI_VAULT_FILES_PLAINTEXT_DIR`
+      # config with `KC_VAULT` unset produced zero org.keycloak.vault DEBUG log output --
+      # the provider factory's init()/create() were never even called). `KC_VAULT_DIR` is
+      # the correct runtime directory property to pair with `KC_VAULT=file` (not the
+      # SPI-prefixed `KC_SPI_VAULT_FILES_PLAINTEXT_DIR`, which despite looking more
+      # "correct" per Keycloak's generic SPI-config convention had no effect here).
+      # Secret filenames follow the default REALM_UNDERSCORE_KEY resolver convention:
+      # `<realmName>_<vaultKey>`, referenced in config as `${vault.<vaultKey>}`. See
+      # conformance/README.md for the full live-verified proof (real secret value
+      # observed on the wire, not just "no error").
+      KC_VAULT: file
+      KC_VAULT_DIR: /opt/keycloak/data/vault
+    volumes:
+      - ./vault:/opt/keycloak/data/vault:ro
     ports:
       - "8091:8080"
     extra_hosts:

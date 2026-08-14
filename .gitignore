@@ -9,6 +9,7 @@ target/
 .project
 .settings/
 conformance/docker/keycloak-scim-client.jar
+conformance/docker/vault/
 dependency-reduced-pom.xml
 .claude/
 .DS_Store

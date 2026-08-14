@@ -26,28 +26,40 @@ Running end-to-end against a real Keycloak instance confirmed:
 - Error handling (`recordResult`, redaction in `ScimSyncMapping.setLastSyncError`) behaves
   correctly against a real 401 response body.
 
-## Known gap: vault-backed credential resolution
+## Vault-backed credential resolution — proven live (2026-08-14)
 
-Neither `--vault=file` (builds successfully, but `session.vault()` silently falls back to
-Keycloak's built-in null-provider — confirmed via bytecode reading of
-`DefaultVaultTranscriber` and a diagnostic `HttpRequestInterceptor` showing the raw
-`${vault.X}` key being echoed back instead of resolved) nor
-`--spi-vault-provider=files-plaintext` (fails outright at build time: "Failed to find
-provider files-plaintext for vault") actually enables a working file-based vault backend
-in this harness, despite `FilesPlainTextVaultProviderFactory` being present on the
-classpath with exactly that provider ID.
+Resolved. `ScimTargetConfig.resolveCredential` was previously only verified at the unit
+level; it's now proven end-to-end against a real Keycloak instance with a real resolved
+secret, not a placeholder.
 
-This is a local harness provisioning gap, not a plugin bug:
-`ScimTargetConfig.resolveCredential`'s use of `session.vault().getStringSecret()` was
-verified byte-for-byte against Keycloak's actual `DefaultVaultTranscriber`/
-`AbstractVaultProvider`/`FilesPlainTextVaultProvider` implementations, and matches the
-documented Vault SPI contract exactly. AC-4 ("never plaintext in component config") is
-proven at the unit level (`ScimTargetConfigTest`), just not yet end-to-end against a real
-resolved secret in this harness.
+**Root cause of the earlier gap**: `--vault=file` at build time only makes the
+file-vault provider *available* — it must be selected again at **runtime** via
+`KC_VAULT=file` (docker-compose.yml), or `session.vault()` silently returns Keycloak's
+no-op provider. Confirmed directly: with `KC_VAULT` unset (even with the directory
+correctly configured via `KC_SPI_VAULT_FILES_PLAINTEXT_DIR`), enabling `DEBUG` logging
+for `org.keycloak.vault` produced **zero** log output — `FilesPlainTextVaultProviderFactory`
+was never even instantiated. The correct runtime pairing is `KC_VAULT=file` +
+`KC_VAULT_DIR=<dir>` (the friendly-alias env vars, not the SPI-prefixed
+`KC_SPI_VAULT_FILES_PLAINTEXT_DIR`, which had no effect despite matching the provider's
+actual `getId()`). Once paired correctly, Keycloak logs
+`Configured PlainTextVaultProviderFactory with directory ...` at DEBUG on startup —
+that line is the tell that it's actually wired up.
 
-**Follow-up**: find the correct Keycloak 25.0.6 Quarkus-CLI incantation to actually enable
-`files-plaintext` (or switch the harness to `--spi-vault-provider=env` / a simpler
-env-var-backed vault for local testing, if that provider exists and is easier to wire up).
+**Live proof**: with a realm `test`, a vault secret file `test_scim-target-token`
+(REALM_UNDERSCORE_KEY convention) containing a random token, and a `keycloak-scim-target`
+component with `credentialVaultRef=${vault.scim-target-token}` pointed at a header-capturing
+HTTP server, creating a Keycloak user produced a real outbound `POST /Users` carrying
+`Authorization: Bearer <the-real-secret-value>` — the exact value from the vault file, not
+the literal `${vault.scim-target-token}` placeholder and not empty. AC-4 is now proven
+end-to-end, not just at the unit level.
+
+This also retroactively explains an earlier, separate misdiagnosis
+(little-auth/keycloak-scim-client#3): a diagnostic interceptor once saw what looked like
+an unauthenticated request on the wire, attributed at the time to a `scim-sdk-client`
+header-configuration bug. Isolated repros against the SDK directly showed no such bug —
+the real cause was this same vault gap: an unresolved credential meant the SDK was
+correctly sending the header, just with the wrong (unresolved) value baked in by our own
+code before the SDK ever saw it.
 
 ## Running it
 
@@ -61,11 +73,16 @@ cd path/to/keycloak-scim-client
 ./mvnw package -DskipTests
 cp target/keycloak-scim-client-*.jar conformance/docker/keycloak-scim-client.jar
 
-# 3. Bring up Keycloak with the plugin installed
+# 3. Create the vault secret Keycloak will resolve (REALM_UNDERSCORE_KEY convention:
+#    <realmName>_<vaultKey>, referenced in config as ${vault.<vaultKey>})
+mkdir -p conformance/docker/vault
+printf '%s' 'your-target-bearer-token' > conformance/docker/vault/test_scim-target-token
+
+# 4. Bring up Keycloak with the plugin installed
 cd conformance/docker
 docker compose up --build -d
 
-# 4. Configure a realm, the SCIM target component, and drive it via Admin REST --
+# 5. Configure a realm, the SCIM target component, and drive it via Admin REST --
 #    see the implementation ticket's progress log for the exact API calls used to
 #    prove this end-to-end.
 ```
