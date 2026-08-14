@@ -3,6 +3,7 @@ package com.littleauth.keycloak.scim.event;
 import com.littleauth.keycloak.scim.client.ScimTargetClient;
 import com.littleauth.keycloak.scim.config.ScimTargetConfig;
 import com.littleauth.keycloak.scim.config.ScimTargetStorageProviderFactory;
+import com.littleauth.keycloak.scim.config.TargetUrlValidator;
 import com.littleauth.keycloak.scim.store.ScimSyncMapping;
 import com.littleauth.keycloak.scim.store.ScimSyncMappingDao;
 import de.captaingoldfish.scim.sdk.client.ScimClientConfig;
@@ -184,9 +185,7 @@ public class ScimEventListenerProvider implements EventListenerProvider {
       // Never synced to begin with -- nothing to deprovision on the target.
       return null;
     }
-    User placeholder = new User();
-    placeholder.setExternalId(mapping.getKeycloakId());
-    return client.deprovision(mapping.getScimId(), config.getDeletePolicy(), placeholder);
+    return client.deprovision(mapping.getScimId(), config.getDeletePolicy());
   }
 
   void recordResult(ScimSyncMapping mapping, ServerResponse<User> response) {
@@ -219,7 +218,14 @@ public class ScimEventListenerProvider implements EventListenerProvider {
         .map(ScimTargetConfig::new);
   }
 
-  private ScimTargetClient buildClient(KeycloakSession session, ScimTargetConfig config) {
+  ScimTargetClient buildClient(KeycloakSession session, ScimTargetConfig config) {
+    // Re-validated here, not just at config-save time (ScimTargetStorageProviderFactory
+    // .validateConfiguration): a save-time-only check is a DNS-rebinding TOCTOU gap -- an
+    // admin-configured hostname that resolved to a public address at save time can be
+    // repointed at an internal address before the next sync fires. This runs on every
+    // dispatch (not cached) so a rebind is caught before the next outbound call, not just
+    // the first one.
+    new TargetUrlValidator(config.getAllowlistHosts()).validate(config.getTargetUrl());
     String credential = config.resolveCredential(session);
     ScimClientConfig clientConfig =
         ScimClientConfig.builder().connectTimeout(5).requestTimeout(10).socketTimeout(10).build();

@@ -2,6 +2,7 @@ package com.littleauth.keycloak.scim.event;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -11,12 +12,14 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.littleauth.keycloak.scim.client.ScimTargetClient;
+import com.littleauth.keycloak.scim.config.InvalidTargetUrlException;
 import com.littleauth.keycloak.scim.config.ScimTargetConfig;
 import com.littleauth.keycloak.scim.store.ScimSyncMapping;
 import de.captaingoldfish.scim.sdk.client.response.ServerResponse;
 import de.captaingoldfish.scim.sdk.common.resources.User;
 import org.junit.jupiter.api.Test;
 import org.keycloak.component.ComponentModel;
+import org.keycloak.models.KeycloakSession;
 
 /**
  * The dispatch decisions this provider makes -- exercised directly against package-private
@@ -115,14 +118,14 @@ class ScimEventListenerProviderTest {
         provider.handleDelete(client, mapping, new ScimTargetConfig(new ComponentModel()));
 
     assertNull(result);
-    verify(client, never()).deprovision(anyString(), any(), any());
+    verify(client, never()).deprovision(anyString(), any());
   }
 
   @Test
   void handleDeleteDeprovisionsWhenAlreadySynced() {
     ScimTargetClient client = mock(ScimTargetClient.class);
     ServerResponse<User> deleted = mock(ServerResponse.class);
-    when(client.deprovision(any(), any(), any())).thenReturn(deleted);
+    when(client.deprovision(any(), any())).thenReturn(deleted);
     ScimSyncMapping mapping = unsyncedMapping("kc-5");
     mapping.setScimId("scim-5");
 
@@ -164,5 +167,20 @@ class ScimEventListenerProviderTest {
 
     assertEquals(ScimSyncMapping.SyncResult.FAILED, mapping.getLastSyncResult());
     assertEquals("HTTP 400: Bad Request", mapping.getLastSyncError());
+  }
+
+  @Test
+  void buildClientRejectsTargetUrlThatNoLongerPassesTheSsrfGuard() {
+    // Re-validated on every dispatch, not just at config-save time -- closes the
+    // DNS-rebinding TOCTOU gap where a hostname could resolve to a public address when
+    // saved and an internal one later.
+    ComponentModel model = new ComponentModel();
+    model.put(ScimTargetConfig.KEY_TARGET_URL, "https://10.0.0.5/scim/v2");
+    var config = new ScimTargetConfig(model);
+    KeycloakSession session = mock(KeycloakSession.class);
+
+    assertThrows(
+        InvalidTargetUrlException.class,
+        () -> provider.buildClient(session, config));
   }
 }

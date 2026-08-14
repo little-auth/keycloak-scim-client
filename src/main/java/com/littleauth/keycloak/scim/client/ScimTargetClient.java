@@ -84,16 +84,17 @@ public class ScimTargetClient implements AutoCloseable {
 
   /**
    * Sets {@code active} via PATCH (native JSON boolean, never the mitodl-style
-   * string-coerced value) when the target supports it, falling back to a full PUT replace
-   * otherwise -- including when a PATCH attempt itself fails with a client error, not just
-   * when discovery never advertised support.
+   * string-coerced value) when the target supports it, falling back to PUT otherwise --
+   * including when a PATCH attempt itself fails with a client error, not just when
+   * discovery never advertised support.
    *
-   * @param fallbackRepresentation the full resource to PUT if PATCH isn't used; the caller
-   *     owns building this from current Keycloak state, since this client holds no
-   *     resource cache of its own.
+   * <p>The PUT fallback fetches the resource's current state first and PUTs that back with
+   * only {@code active} changed, rather than PUTting a minimal/placeholder representation
+   * -- SCIM PUT is a full replace per RFC 7644 §3.5.1, so PUTting anything less than the
+   * complete current resource would wipe every field this client doesn't know about
+   * (email, name, username) instead of just toggling one flag.
    */
-  public ServerResponse<User> setActive(
-      String scimId, boolean active, User fallbackRepresentation) {
+  public ServerResponse<User> setActive(String scimId, boolean active) {
     if (patchCapability.shouldAttemptPatch()) {
       ServerResponse<User> response =
           requestBuilder
@@ -113,15 +114,26 @@ public class ScimTargetClient implements AutoCloseable {
       }
       patchCapability.recordPatchClientError();
     }
-    fallbackRepresentation.setActive(active);
-    return replaceUser(scimId, fallbackRepresentation);
+    return replaceActiveViaFetchAndPut(scimId, active);
+  }
+
+  private ServerResponse<User> replaceActiveViaFetchAndPut(String scimId, boolean active) {
+    ServerResponse<User> current =
+        requestBuilder.get(User.class, USERS_ENDPOINT, scimId).sendRequest(authHeaders);
+    if (!current.isSuccess()) {
+      // Can't safely PUT without the current state -- surface the GET failure rather
+      // than risk wiping fields with an incomplete replace.
+      return current;
+    }
+    User user = current.getResource();
+    user.setActive(active);
+    return replaceUser(scimId, user);
   }
 
   /** AC-3: never throws, and honors the realm's configured delete policy. */
-  public ServerResponse<User> deprovision(
-      String scimId, DeletePolicy policy, User softDeleteRepresentation) {
+  public ServerResponse<User> deprovision(String scimId, DeletePolicy policy) {
     return switch (policy) {
-      case SOFT_DELETE -> setActive(scimId, false, softDeleteRepresentation);
+      case SOFT_DELETE -> setActive(scimId, false);
       case HARD_DELETE -> deleteUser(scimId);
     };
   }

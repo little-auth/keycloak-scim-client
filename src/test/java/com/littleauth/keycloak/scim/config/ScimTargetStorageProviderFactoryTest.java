@@ -48,7 +48,6 @@ class ScimTargetStorageProviderFactoryTest {
     List<String> names = factory.getConfigProperties().stream().map(p -> p.getName()).toList();
     assertTrue(names.contains(ScimTargetConfig.KEY_TARGET_URL));
     assertTrue(names.contains(ScimTargetConfig.KEY_ALLOWLIST_HOSTS));
-    assertTrue(names.contains(ScimTargetConfig.KEY_AUTH_MODE));
     assertTrue(names.contains(ScimTargetConfig.KEY_CREDENTIAL_VAULT_REF));
     assertTrue(names.contains(ScimTargetConfig.KEY_DELETE_POLICY));
     assertTrue(names.contains(ScimTargetConfig.KEY_SYNC_ENABLED));

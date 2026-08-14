@@ -54,18 +54,11 @@ public class ScimTargetStorageProviderFactory
             ProviderConfigProperty.MULTIVALUED_STRING_TYPE,
             null),
         new ProviderConfigProperty(
-            ScimTargetConfig.KEY_AUTH_MODE,
-            "Authentication mode",
-            "How this plugin authenticates outbound SCIM requests.",
-            ProviderConfigProperty.LIST_TYPE,
-            ScimTargetConfig.AuthMode.BEARER.name(),
-            ScimTargetConfig.AuthMode.BEARER.name(),
-            ScimTargetConfig.AuthMode.BASIC.name()),
-        new ProviderConfigProperty(
             ScimTargetConfig.KEY_CREDENTIAL_VAULT_REF,
             "Credential (vault reference)",
             "A Keycloak Vault SPI reference (${vault.ID}), never a raw secret -- see "
-                + "Server Administration Guide \"Using a vault to obtain secrets\".",
+                + "Server Administration Guide \"Using a vault to obtain secrets\". Sent as "
+                + "a Bearer token; Basic auth isn't implemented yet (tracked separately).",
             ProviderConfigProperty.STRING_TYPE,
             null,
             true),

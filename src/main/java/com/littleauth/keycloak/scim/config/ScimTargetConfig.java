@@ -19,7 +19,6 @@ public class ScimTargetConfig {
 
   public static final String KEY_TARGET_URL = "targetUrl";
   public static final String KEY_ALLOWLIST_HOSTS = "targetUrlAllowlistHosts";
-  public static final String KEY_AUTH_MODE = "authMode";
   public static final String KEY_CREDENTIAL_VAULT_REF = "credentialVaultRef";
   public static final String KEY_DELETE_POLICY = "deletePolicy";
   public static final String KEY_SYNC_ENABLED = "syncEnabled";
@@ -40,12 +39,6 @@ public class ScimTargetConfig {
   public List<String> getAllowlistHosts() {
     List<String> hosts = model.getConfig().get(KEY_ALLOWLIST_HOSTS);
     return hosts == null ? List.of() : List.copyOf(hosts);
-  }
-
-  /** How this plugin authenticates outbound SCIM requests. Defaults to {@link AuthMode#BEARER}. */
-  public AuthMode getAuthMode() {
-    String raw = model.get(KEY_AUTH_MODE);
-    return raw == null ? AuthMode.BEARER : AuthMode.valueOf(raw);
   }
 
   /**
@@ -82,12 +75,6 @@ public class ScimTargetConfig {
                   new IllegalStateException(
                       "SCIM target credential vault reference did not resolve to a value"));
     }
-  }
-
-  /** Outbound SCIM request authentication scheme. */
-  public enum AuthMode {
-    BEARER,
-    BASIC
   }
 
   /** How a Keycloak user delete maps to the SCIM target. */
