@@ -5,7 +5,9 @@ import com.littleauth.keycloak.scim.config.ScimTargetConfig.DeletePolicy;
 import de.captaingoldfish.scim.sdk.client.ScimRequestBuilder;
 import de.captaingoldfish.scim.sdk.client.response.ServerResponse;
 import de.captaingoldfish.scim.sdk.common.constants.enums.PatchOp;
+import de.captaingoldfish.scim.sdk.common.resources.ServiceProvider;
 import de.captaingoldfish.scim.sdk.common.resources.User;
+import java.util.Map;
 
 /**
  * Thin orchestration layer over {@code scim-sdk-client}: create/replace/delete Users, plus
@@ -13,27 +15,45 @@ import de.captaingoldfish.scim.sdk.common.resources.User;
  * Keycloak enable/disable maps to). Request-building correctness is proven against real
  * traffic by the keycloak-it conformance harness, not exhaustive mocking here -- see the
  * implementation ticket's discovery log for why that split was made.
+ *
+ * <p>Every request explicitly passes its Authorization header via {@code sendRequest(Map)}
+ * rather than relying on {@code ScimClientConfig}'s client-level header configuration --
+ * confirmed via the conformance harness that the latter is unreliable in scim-sdk-client
+ * 1.34.0 (a client configured with {@code .httpHeaders(...)}/{@code .httpMultiHeaders(...)}
+ * still sent unauthenticated discovery requests). {@link
+ * ScimRequestBuilder#loadServiceProviderConfiguration()} has no such per-call override, so
+ * discovery is built manually instead of using it.
  */
 public class ScimTargetClient implements AutoCloseable {
 
   private static final String USERS_ENDPOINT = "/Users";
+  private static final String SERVICE_PROVIDER_CONFIG_ENDPOINT = "/ServiceProviderConfig";
 
   private final ScimRequestBuilder requestBuilder;
   private final PatchCapability patchCapability;
+  private final Map<String, String> authHeaders;
 
   /** Connects and immediately runs discovery to seed the initial PATCH capability. */
-  public ScimTargetClient(ScimRequestBuilder requestBuilder) {
-    this(requestBuilder, new PatchCapability(false));
+  public ScimTargetClient(ScimRequestBuilder requestBuilder, Map<String, String> authHeaders) {
+    this(requestBuilder, new PatchCapability(false), authHeaders);
     patchCapability.recordDiscovery(fetchPatchSupport());
   }
 
-  ScimTargetClient(ScimRequestBuilder requestBuilder, PatchCapability patchCapability) {
+  ScimTargetClient(
+      ScimRequestBuilder requestBuilder,
+      PatchCapability patchCapability,
+      Map<String, String> authHeaders) {
     this.requestBuilder = requestBuilder;
     this.patchCapability = patchCapability;
+    this.authHeaders = authHeaders;
   }
 
   private boolean fetchPatchSupport() {
-    return requestBuilder.loadServiceProviderConfiguration().getPatchConfig().isSupported();
+    ServerResponse<ServiceProvider> response =
+        requestBuilder
+            .get(ServiceProvider.class, SERVICE_PROVIDER_CONFIG_ENDPOINT)
+            .sendRequest(authHeaders);
+    return response.isSuccess() && response.getResource().getPatchConfig().isSupported();
   }
 
   /** Re-checks the target's advertised PATCH support, piggybacked on reconciliation cadence. */
@@ -46,7 +66,7 @@ public class ScimTargetClient implements AutoCloseable {
     return requestBuilder
         .create(User.class, USERS_ENDPOINT)
         .setResource(user.toString())
-        .sendRequest();
+        .sendRequest(authHeaders);
   }
 
   /** Full PUT replace of an existing User resource. */
@@ -54,12 +74,12 @@ public class ScimTargetClient implements AutoCloseable {
     return requestBuilder
         .update(User.class, USERS_ENDPOINT, scimId)
         .setResource(user.toString())
-        .sendRequest();
+        .sendRequest(authHeaders);
   }
 
   /** Hard DELETE of a User resource; only invoked when the realm is configured for it. */
   public ServerResponse<User> deleteUser(String scimId) {
-    return requestBuilder.delete(User.class, USERS_ENDPOINT, scimId).sendRequest();
+    return requestBuilder.delete(User.class, USERS_ENDPOINT, scimId).sendRequest(authHeaders);
   }
 
   /**
@@ -83,7 +103,7 @@ public class ScimTargetClient implements AutoCloseable {
               .op(PatchOp.REPLACE)
               .valueNode(BooleanNode.valueOf(active))
               .build()
-              .sendRequest();
+              .sendRequest(authHeaders);
       if (response.isSuccess()) {
         return response;
       }

@@ -18,6 +18,7 @@ import de.captaingoldfish.scim.sdk.client.builder.PatchBuilder;
 import de.captaingoldfish.scim.sdk.client.builder.UpdateBuilder;
 import de.captaingoldfish.scim.sdk.client.response.ServerResponse;
 import de.captaingoldfish.scim.sdk.common.resources.User;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -73,9 +74,10 @@ class ScimTargetClientTest {
     ScimRequestBuilder requestBuilder = mock(ScimRequestBuilder.class);
     PatchBuilder<User> patchBuilder = mockPatchBuilder(requestBuilder, "scim-123");
     ServerResponse<User> success = successResponse();
-    when(patchBuilder.sendRequest()).thenReturn(success);
+    when(patchBuilder.sendRequest(any())).thenReturn(success);
 
-    var client = new ScimTargetClient(requestBuilder, new PatchCapability(true));
+    var client =
+        new ScimTargetClient(requestBuilder, new PatchCapability(true), Map.of());
     ServerResponse<User> result = client.setActive("scim-123", false, new User());
 
     assertEquals(success, result);
@@ -87,9 +89,10 @@ class ScimTargetClientTest {
     ScimRequestBuilder requestBuilder = mock(ScimRequestBuilder.class);
     UpdateBuilder<User> updateBuilder = mockUpdateBuilder(requestBuilder, "scim-123");
     ServerResponse<User> success = successResponse();
-    when(updateBuilder.sendRequest()).thenReturn(success);
+    when(updateBuilder.sendRequest(any())).thenReturn(success);
 
-    var client = new ScimTargetClient(requestBuilder, new PatchCapability(false));
+    var client =
+        new ScimTargetClient(requestBuilder, new PatchCapability(false), Map.of());
     ServerResponse<User> result = client.setActive("scim-123", false, new User());
 
     assertEquals(success, result);
@@ -101,13 +104,14 @@ class ScimTargetClientTest {
     ScimRequestBuilder requestBuilder = mock(ScimRequestBuilder.class);
     PatchBuilder<User> patchBuilder = mockPatchBuilder(requestBuilder, "scim-123");
     ServerResponse<User> patchError = errorResponse(400);
-    when(patchBuilder.sendRequest()).thenReturn(patchError);
+    when(patchBuilder.sendRequest(any())).thenReturn(patchError);
     UpdateBuilder<User> updateBuilder = mockUpdateBuilder(requestBuilder, "scim-123");
     ServerResponse<User> putSuccess = successResponse();
-    when(updateBuilder.sendRequest()).thenReturn(putSuccess);
+    when(updateBuilder.sendRequest(any())).thenReturn(putSuccess);
 
     var capability = new PatchCapability(true);
-    var client = new ScimTargetClient(requestBuilder, capability);
+    var client =
+        new ScimTargetClient(requestBuilder, capability, Map.of());
     ServerResponse<User> result = client.setActive("scim-123", false, new User());
 
     assertEquals(putSuccess, result);
@@ -119,10 +123,11 @@ class ScimTargetClientTest {
     ScimRequestBuilder requestBuilder = mock(ScimRequestBuilder.class);
     PatchBuilder<User> patchBuilder = mockPatchBuilder(requestBuilder, "scim-123");
     ServerResponse<User> serverError = errorResponse(503);
-    when(patchBuilder.sendRequest()).thenReturn(serverError);
+    when(patchBuilder.sendRequest(any())).thenReturn(serverError);
 
     var capability = new PatchCapability(true);
-    var client = new ScimTargetClient(requestBuilder, capability);
+    var client =
+        new ScimTargetClient(requestBuilder, capability, Map.of());
     ServerResponse<User> result = client.setActive("scim-123", false, new User());
 
     assertEquals(serverError, result);
@@ -136,9 +141,10 @@ class ScimTargetClientTest {
     DeleteBuilder<User> deleteBuilder = mock(DeleteBuilder.class);
     when(requestBuilder.delete(User.class, "/Users", "scim-123")).thenReturn(deleteBuilder);
     ServerResponse<User> success = successResponse();
-    when(deleteBuilder.sendRequest()).thenReturn(success);
+    when(deleteBuilder.sendRequest(any())).thenReturn(success);
 
-    var client = new ScimTargetClient(requestBuilder, new PatchCapability(true));
+    var client =
+        new ScimTargetClient(requestBuilder, new PatchCapability(true), Map.of());
     ServerResponse<User> result =
         client.deprovision("scim-123", DeletePolicy.HARD_DELETE, new User());
 
@@ -151,9 +157,10 @@ class ScimTargetClientTest {
     ScimRequestBuilder requestBuilder = mock(ScimRequestBuilder.class);
     PatchBuilder<User> patchBuilder = mockPatchBuilder(requestBuilder, "scim-123");
     ServerResponse<User> success = successResponse();
-    when(patchBuilder.sendRequest()).thenReturn(success);
+    when(patchBuilder.sendRequest(any())).thenReturn(success);
 
-    var client = new ScimTargetClient(requestBuilder, new PatchCapability(true));
+    var client =
+        new ScimTargetClient(requestBuilder, new PatchCapability(true), Map.of());
     ServerResponse<User> result =
         client.deprovision("scim-123", DeletePolicy.SOFT_DELETE, new User());
 

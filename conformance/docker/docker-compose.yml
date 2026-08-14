@@ -1,0 +1,25 @@
+# Brings up a real Keycloak instance with keycloak-scim-client installed, pointed at
+# scim-it-server (mario/scimitar's keycloak-it) running as a plain process on the host --
+# not another compose service, matching mario/scimitar's own keycloak-it harness pattern.
+# Dev-mode, no Postgres: this instance is disposable (thrown away on `docker compose down`).
+services:
+  keycloak:
+    build:
+      context: .
+      dockerfile: Dockerfile.keycloak-scim-client
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      # Keycloak's own SPI config env var convention is KC_SPI_<spi>_<provider-id>_<property>;
+      # the generic KC_VAULT_DIR isn't a real property name, which is why the vault
+      # silently degraded to echoing the raw key back as the "secret" instead of reading
+      # this file -- confirmed via a diagnostic HttpRequestInterceptor on the real
+      # outgoing request, not guessed.
+      KC_SPI_VAULT_FILES_PLAINTEXT_DIR: /opt/keycloak/data/vault
+      KC_SPI_VAULT_FILES_PLAINTEXT_KEY_RESOLVERS: KEY_ONLY
+    ports:
+      - "8091:8080"
+    extra_hosts:
+      # Linux Docker has no automatic host.docker.internal -- our plugin's outbound
+      # requests need to reach scim-it-server on the host.
+      - "host.docker.internal:host-gateway"

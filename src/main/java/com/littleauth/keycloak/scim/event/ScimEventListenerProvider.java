@@ -59,12 +59,21 @@ public class ScimEventListenerProvider implements EventListenerProvider {
 
   @Override
   public void onEvent(AdminEvent event, boolean includeRepresentation) {
-    AdminUserEventInterpreter.interpret(event)
-        .ifPresent(
-            intent -> {
-              String realmId = event.getRealmId();
-              executorService.submit(() -> dispatch(realmId, intent));
-            });
+    Optional<ScimSyncIntent> intentOpt = AdminUserEventInterpreter.interpret(event);
+    LOGGER.info(
+        "SCIM sync: onEvent resourceType="
+            + event.getResourceType()
+            + " op="
+            + event.getOperationType()
+            + " path="
+            + event.getResourcePath()
+            + " interpreted="
+            + intentOpt.isPresent());
+    intentOpt.ifPresent(
+        intent -> {
+          String realmId = event.getRealmId();
+          executorService.submit(() -> dispatch(realmId, intent));
+        });
   }
 
   private void dispatch(String realmId, ScimSyncIntent intent) {
@@ -84,13 +93,22 @@ public class ScimEventListenerProvider implements EventListenerProvider {
   private void processIntent(KeycloakSession session, String realmId, ScimSyncIntent intent) {
     RealmModel realm = session.realms().getRealm(realmId);
     if (realm == null) {
+      LOGGER.warning("SCIM sync: no realm found for id " + realmId);
       return;
     }
+    session.getContext().setRealm(realm);
     Optional<ScimTargetConfig> configOpt = loadConfig(realm);
-    if (configOpt.isEmpty() || !configOpt.get().isSyncEnabled()) {
+    if (configOpt.isEmpty()) {
+      LOGGER.info("SCIM sync: no keycloak-scim-target component configured for realm " + realmId);
+      return;
+    }
+    if (!configOpt.get().isSyncEnabled()) {
+      LOGGER.info("SCIM sync: sync disabled for realm " + realmId);
       return;
     }
     ScimTargetConfig config = configOpt.get();
+    LOGGER.info(
+        "SCIM sync: dispatching " + intent.action() + " for user " + intent.keycloakUserId());
 
     EntityManager entityManager =
         session.getProvider(JpaConnectionProvider.class).getEntityManager();
@@ -101,7 +119,18 @@ public class ScimEventListenerProvider implements EventListenerProvider {
     try (ScimTargetClient client = buildClient(session, config)) {
       ServerResponse<User> response = handle(client, mapping, intent, config);
       recordResult(mapping, response);
+      LOGGER.info(
+          "SCIM sync: "
+              + intent.action()
+              + " for "
+              + intent.keycloakUserId()
+              + " -> "
+              + mapping.getLastSyncResult()
+              + " ("
+              + mapping.getLastSyncError()
+              + ")");
     } catch (RuntimeException e) {
+      LOGGER.log(Level.WARNING, "SCIM sync: dispatch threw for " + intent.keycloakUserId(), e);
       mapping.setLastSyncResult(ScimSyncMapping.SyncResult.FAILED);
       mapping.setLastSyncError(e.getMessage());
     }
@@ -176,8 +205,15 @@ public class ScimEventListenerProvider implements EventListenerProvider {
   }
 
   private Optional<ScimTargetConfig> loadConfig(RealmModel realm) {
+    // realm.getComponentsStream(providerType) (the filtered overload) does not reliably
+    // return components created via the Admin REST API in this Keycloak version/storage
+    // mode -- confirmed via the conformance harness against a real instance: the
+    // unfiltered stream includes our component with an exactly-matching providerType,
+    // the filtered overload returns none. Filtering the unfiltered stream ourselves
+    // sidesteps whatever that overload's bug is.
     return realm
-        .getComponentsStream(UserStorageProvider.class.getName())
+        .getComponentsStream()
+        .filter(c -> UserStorageProvider.class.getName().equals(c.getProviderType()))
         .filter(c -> ScimTargetStorageProviderFactory.ID.equals(c.getProviderId()))
         .findFirst()
         .map(ScimTargetConfig::new);
@@ -186,14 +222,12 @@ public class ScimEventListenerProvider implements EventListenerProvider {
   private ScimTargetClient buildClient(KeycloakSession session, ScimTargetConfig config) {
     String credential = config.resolveCredential(session);
     ScimClientConfig clientConfig =
-        ScimClientConfig.builder()
-            .httpHeaders(Map.of("Authorization", "Bearer " + credential))
-            .connectTimeout(5)
-            .requestTimeout(10)
-            .socketTimeout(10)
-            .build();
+        ScimClientConfig.builder().connectTimeout(5).requestTimeout(10).socketTimeout(10).build();
     var requestBuilder = new ScimRequestBuilder(config.getTargetUrl(), clientConfig);
-    return new ScimTargetClient(requestBuilder);
+    // Passed per-request via ScimTargetClient, not through ScimClientConfig -- see that
+    // class's doc for why client-level header config proved unreliable in this SDK version.
+    Map<String, String> authHeaders = Map.of("Authorization", "Bearer " + credential);
+    return new ScimTargetClient(requestBuilder, authHeaders);
   }
 
   @Override

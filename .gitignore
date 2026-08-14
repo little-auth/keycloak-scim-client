@@ -8,5 +8,8 @@ target/
 .classpath
 .project
 .settings/
+conformance/docker/keycloak-scim-client.jar
+dependency-reduced-pom.xml
+.claude/
 .DS_Store
 *.log

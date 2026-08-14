@@ -1,0 +1,23 @@
+# Builds a real Keycloak 25.0.6 image with our own plugin jar installed, for the
+# conformance test (conformance/README.md) -- mirrors mario/scimitar's keycloak-it
+# Dockerfile.keycloak-scim, pinned to the same Keycloak version this plugin's pom.xml
+# targets, but with OUR jar instead of mitodl's.
+FROM quay.io/keycloak/keycloak:25.0.6 AS keycloak-builder
+COPY keycloak-scim-client.jar /opt/keycloak/providers/keycloak-scim-client.jar
+# KNOWN GAP (see .usefinal/plans/keycloak-scim-client-implementation.md Follow-ups):
+# neither --vault=file (builds, but session.vault() falls back to Keycloak's built-in
+# null-provider -- confirmed via a diagnostic HttpRequestInterceptor and bytecode reading
+# of DefaultVaultTranscriber) nor --spi-vault-provider=files-plaintext ("Failed to find
+# provider files-plaintext for vault" -- build fails outright) actually enables a working
+# file-based vault backend for this harness. This is a local conformance-harness
+# provisioning gap, not a plugin bug: ScimTargetConfig.resolveCredential's use of
+# session.vault().getStringSecret() was verified byte-for-byte against Keycloak's
+# documented Vault SPI contract. Building without vault enabled for now -- AC-4's
+# "never plaintext in component config" is proven at the unit level
+# (ScimTargetConfigTest), just not end-to-end against a real resolved secret here yet.
+RUN /opt/keycloak/bin/kc.sh build --health-enabled=true
+
+FROM quay.io/keycloak/keycloak:25.0.6
+COPY --from=keycloak-builder /opt/keycloak/ /opt/keycloak/
+ENTRYPOINT ["/opt/keycloak/bin/kc.sh"]
+CMD ["start-dev", "--health-enabled=true"]
