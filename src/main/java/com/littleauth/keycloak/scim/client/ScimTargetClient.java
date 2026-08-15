@@ -16,13 +16,17 @@ import java.util.Map;
  * traffic by the keycloak-it conformance harness, not exhaustive mocking here -- see the
  * implementation ticket's discovery log for why that split was made.
  *
- * <p>Every request explicitly passes its Authorization header via {@code sendRequest(Map)}
- * rather than relying on {@code ScimClientConfig}'s client-level header configuration --
- * confirmed via the conformance harness that the latter is unreliable in scim-sdk-client
- * 1.34.0 (a client configured with {@code .httpHeaders(...)}/{@code .httpMultiHeaders(...)}
- * still sent unauthenticated discovery requests). {@link
- * ScimRequestBuilder#loadServiceProviderConfiguration()} has no such per-call override, so
- * discovery is built manually instead of using it.
+ * <p>Bearer auth passes its Authorization header explicitly via {@code sendRequest(Map)}
+ * on every request, since this SDK has no client-level convenience for a bearer token the
+ * way it does for Basic auth ({@code ScimClientConfig.builder().basic(...)}, wired in by
+ * {@code ScimEventListenerProvider.buildClient} for {@code AuthMode.BASIC}). The {@code
+ * authHeaders} map passed to this class's constructor is empty in that case on purpose --
+ * an explicit header here would collide with the client-level {@code BasicAuth}, which
+ * {@code ScimHttpClient} only applies when the outgoing request doesn't already carry an
+ * {@code Authorization} header (confirmed directly against scim-sdk-client 1.34.0's
+ * bytecode, not assumed). {@link ScimRequestBuilder#loadServiceProviderConfiguration()}
+ * has no per-call header override at all, so discovery is built manually instead of using
+ * it, regardless of auth mode.
  */
 public class ScimTargetClient implements AutoCloseable {
 
