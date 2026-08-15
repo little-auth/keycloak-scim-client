@@ -113,14 +113,23 @@ public class ScimTargetStorageProviderFactory
               + Arrays.toString(ScimTargetConfig.DeletePolicy.values()),
           e);
     }
-    if (deletePolicy == ScimTargetConfig.DeletePolicy.HARD_DELETE
-        && !config.isHardDeleteConfirmed(realm)) {
-      throw new ComponentValidationException(
-          "Hard-delete mode permanently removes the user's SCIM resource on every Keycloak "
-              + "user delete and cannot be undone -- to enable it, set \"Hard-delete "
-              + "confirmation\" to the exact phrase: \""
-              + ScimTargetConfig.requiredHardDeleteConfirmationPhrase(realm)
-              + "\".");
+    if (deletePolicy == ScimTargetConfig.DeletePolicy.HARD_DELETE) {
+      if (!config.isHardDeleteConfirmed(realm)) {
+        throw new ComponentValidationException(
+            "Hard-delete mode permanently removes the user's SCIM resource on every Keycloak "
+                + "user delete and cannot be undone -- to enable it, set \"Hard-delete "
+                + "confirmation\" to the exact phrase: \""
+                + ScimTargetConfig.requiredHardDeleteConfirmationPhrase(realm)
+                + "\".");
+      }
+    } else if (model.getConfig().containsKey(ScimTargetConfig.KEY_HARD_DELETE_CONFIRMATION)) {
+      // Every save that leaves (or never enters) HARD_DELETE clears any stored confirmation
+      // value -- otherwise a stale, previously-valid phrase would silently re-arm HARD_DELETE
+      // on a later flip back with no re-confirmation, exactly the bare-toggle bypass this
+      // gate exists to close (adversarial-confirmation-pass finding, not caught by the
+      // council rounds: HARD_DELETE -> SOFT_DELETE -> HARD_DELETE re-enabled with zero
+      // friction the second time).
+      model.getConfig().remove(ScimTargetConfig.KEY_HARD_DELETE_CONFIRMATION);
     }
     String targetUrl = config.getTargetUrl();
     if (targetUrl == null || targetUrl.isBlank()) {

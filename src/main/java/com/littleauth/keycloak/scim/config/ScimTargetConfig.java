@@ -88,7 +88,10 @@ public class ScimTargetConfig {
    * mitigation, see the implementation ticket).
    */
   public static String requiredHardDeleteConfirmationPhrase(RealmModel realm) {
-    return "ENABLE HARD DELETE FOR " + realm.getName().toUpperCase(Locale.ROOT);
+    // Trimmed like the admin-typed input is (see isHardDeleteConfirmed) -- a realm name
+    // carrying incidental surrounding whitespace must not produce a phrase no trimmed input
+    // could ever match, which would permanently block HARD_DELETE for that realm.
+    return "ENABLE HARD DELETE FOR " + realm.getName().trim().toUpperCase(Locale.ROOT);
   }
 
   /**

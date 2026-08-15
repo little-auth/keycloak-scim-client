@@ -162,6 +162,19 @@ class ScimTargetConfigTest {
     assertTrue(config.isHardDeleteConfirmed(realmNamed("acme")));
   }
 
+  /**
+   * Adversarial-confirmation-pass finding: a realm name carrying incidental surrounding
+   * whitespace must not produce a required phrase no trimmed admin-typed input could ever
+   * match -- that would permanently block HARD_DELETE for that realm.
+   */
+  @Test
+  void requiredHardDeleteConfirmationPhraseTrimsTheRealmNameToo() {
+    ComponentModel model = new ComponentModel();
+    model.put(ScimTargetConfig.KEY_HARD_DELETE_CONFIRMATION, "ENABLE HARD DELETE FOR ACME");
+    var config = new ScimTargetConfig(model);
+    assertTrue(config.isHardDeleteConfirmed(realmNamed("acme ")));
+  }
+
   @Test
   void isHardDeleteConfirmedIsCaseSensitive() {
     ComponentModel model = new ComponentModel();
