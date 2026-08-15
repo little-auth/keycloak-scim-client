@@ -4,6 +4,8 @@ import com.littleauth.keycloak.scim.config.ScimTargetConfig;
 import com.littleauth.keycloak.scim.config.ScimTargetConfigLookup;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -19,10 +21,21 @@ import org.keycloak.models.utils.KeycloakModelUtils;
  * synchronous per-user HTTP calls directly on that callback would risk stalling
  * reconciliation, and any other plugin's timer-scheduled work, across every realm if one
  * target hangs).
+ *
+ * <p>{@link #inFlightRealmIds} skips a realm the tick would otherwise resubmit while its
+ * previous page is still running -- a page's worst-case duration (up to {@code PAGE_SIZE}
+ * users, each up to a couple of SCIM round trips at the client's configured timeouts) can
+ * exceed the tick interval. Without this guard, two overlapping runs for the same realm
+ * would both read the checkpoint's current offset and do duplicate work; each per-user step
+ * is independently idempotent (see {@code ReconciliationJob}'s duplicate-create guard) so an
+ * overlap was never a correctness hazard, but it is a real, easily-avoided waste of outbound
+ * calls against the target -- found and fixed during this change's own review, not left as a
+ * documented limitation.
  */
 final class ReconciliationTick {
 
   private static final Logger LOGGER = Logger.getLogger(ReconciliationTick.class.getName());
+  private static final Set<String> IN_FLIGHT_REALM_IDS = ConcurrentHashMap.newKeySet();
 
   private ReconciliationTick() {}
 
@@ -31,7 +44,21 @@ final class ReconciliationTick {
         KeycloakModelUtils.runJobInTransactionWithResult(
             sessionFactory, session -> session.realms().getRealmsStream().map(RealmModel::getId).toList());
     for (String realmId : realmIds) {
-      executor.submit(() -> runForRealm(sessionFactory, realmId));
+      if (!IN_FLIGHT_REALM_IDS.add(realmId)) {
+        LOGGER.info(
+            "SCIM reconciliation: skipping realm "
+                + realmId
+                + " this tick -- its previous page is still running");
+        continue;
+      }
+      executor.submit(
+          () -> {
+            try {
+              runForRealm(sessionFactory, realmId);
+            } finally {
+              IN_FLIGHT_REALM_IDS.remove(realmId);
+            }
+          });
     }
   }
 
