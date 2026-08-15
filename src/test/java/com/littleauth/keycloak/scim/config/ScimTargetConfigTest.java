@@ -131,6 +131,14 @@ class ScimTargetConfigTest {
   }
 
   @Test
+  void isHardDeleteConfirmedReturnsFalseWhenConfirmationExplicitlySetToEmptyString() {
+    ComponentModel model = new ComponentModel();
+    model.put(ScimTargetConfig.KEY_HARD_DELETE_CONFIRMATION, "");
+    var config = new ScimTargetConfig(model);
+    assertFalse(config.isHardDeleteConfirmed(realmNamed("acme")));
+  }
+
+  @Test
   void isHardDeleteConfirmedReturnsFalseWhenConfirmationDoesNotMatchRealmSpecificPhrase() {
     ComponentModel model = new ComponentModel();
     model.put(ScimTargetConfig.KEY_HARD_DELETE_CONFIRMATION, "ENABLE HARD DELETE FOR OTHER-REALM");
