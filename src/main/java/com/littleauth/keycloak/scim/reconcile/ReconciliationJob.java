@@ -82,12 +82,17 @@ public final class ReconciliationJob {
           try {
             UserRepresentation kcRep = ModelToRepresentation.toRepresentation(session, realm, kcUser);
             outcome = reconcileUserSafely(client, mappingDao, realm.getId(), kcUser.getId(), kcRep);
+            // Flush this user's mapping write now rather than letting Hibernate's default
+            // auto-flush defer it to the next query (which would run as part of some
+            // *later* user's findOrCreate) or to the final commit -- either way, a
+            // persistence-level failure here (not just an HTTP-level one) would otherwise
+            // surface against the wrong user, or only at commit time when it's too late to
+            // isolate from users that already succeeded.
+            entityManager.flush();
           } catch (RuntimeException e) {
             LOGGER.log(
                 Level.WARNING,
-                "SCIM reconciliation: user "
-                    + kcUser.getId()
-                    + " threw building its representation, skipping",
+                "SCIM reconciliation: user " + kcUser.getId() + " threw, skipping",
                 e);
             outcome = UserOutcome.FAILED;
           }
