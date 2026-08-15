@@ -4,6 +4,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import de.captaingoldfish.scim.sdk.common.resources.User;
+import de.captaingoldfish.scim.sdk.common.resources.complex.Name;
+import de.captaingoldfish.scim.sdk.common.resources.multicomplex.Email;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -73,5 +77,106 @@ class KeycloakUserMapperTest {
     String noEnabledFlag = "{\"username\":\"bjensen\"}";
     var user = KeycloakUserMapper.toScimUser(noEnabledFlag, "kc-user-1");
     assertFalse(user.isActive().orElseThrow());
+  }
+
+  private static org.keycloak.representations.idm.UserRepresentation representation(
+      String username, String firstName, String lastName, String email, Boolean enabled) {
+    var rep = new org.keycloak.representations.idm.UserRepresentation();
+    rep.setUsername(username);
+    rep.setFirstName(firstName);
+    rep.setLastName(lastName);
+    rep.setEmail(email);
+    rep.setEnabled(enabled);
+    return rep;
+  }
+
+  @Test
+  void mergeOntoOverwritesManagedFieldsButPreservesFieldsItDoesNotModel() {
+    // ReconciliationJob's fetch-then-merge mitigation (issue #6): the target may have
+    // fields this plugin never sets (e.g. a phone number added by another SCIM client) --
+    // mergeOnto must never touch anything except externalId/userName/active/name/emails.
+    User target = new User();
+    target.setId("scim-existing");
+    target.setPhoneNumbers(
+        List.of(
+            de.captaingoldfish.scim.sdk.common.resources.multicomplex.PhoneNumber.builder()
+                .value("+1-555-0100")
+                .build()));
+    target.setUserName("stale-username");
+
+    var kcUser = representation("bjensen", "Barbara", "Jensen", "bjensen@example.com", true);
+    User merged = KeycloakUserMapper.mergeOnto(target, kcUser, "kc-user-1");
+
+    assertEquals(target, merged, "mergeOnto mutates and returns the same instance");
+    assertEquals("bjensen", merged.getUserName().orElseThrow());
+    assertEquals("kc-user-1", merged.getExternalId().orElseThrow());
+    assertTrue(merged.isActive().orElseThrow());
+    assertEquals("scim-existing", merged.getId().orElseThrow(), "id must never be touched");
+    assertEquals(1, merged.getPhoneNumbers().size(), "unmanaged fields must survive the merge");
+  }
+
+  @Test
+  void mergeOntoClearsManagedNameAndEmailWhenKeycloakNoLongerHasThem() {
+    User target = new User();
+    target.setName(Name.builder().givenName("Old").familyName("Name").build());
+    target.setEmails(List.of(Email.builder().value("old@example.com").primary(true).build()));
+
+    var kcUser = representation("bjensen", null, null, null, true);
+    User merged = KeycloakUserMapper.mergeOnto(target, kcUser, "kc-user-1");
+
+    assertFalse(merged.getName().isPresent());
+    assertTrue(merged.getEmails().isEmpty());
+  }
+
+  @Test
+  void toScimUserFromRepresentationMatchesTheJsonOverload() {
+    var kcUser = representation("bjensen", "Barbara", "Jensen", "bjensen@example.com", true);
+    User fromRepresentation = KeycloakUserMapper.toScimUser(kcUser, "kc-user-1");
+    User fromJson = KeycloakUserMapper.toScimUser(REPRESENTATION, "kc-user-1");
+
+    assertEquals(fromJson.getUserName(), fromRepresentation.getUserName());
+    assertEquals(fromJson.isActive(), fromRepresentation.isActive());
+  }
+
+  @Test
+  void differsIsFalseWhenManagedFieldsAllMatch() {
+    var kcUser = representation("bjensen", "Barbara", "Jensen", "bjensen@example.com", true);
+    User current = KeycloakUserMapper.toScimUser(kcUser, "kc-user-1");
+    User desired = KeycloakUserMapper.toScimUser(kcUser, "kc-user-1");
+
+    assertFalse(KeycloakUserMapper.differs(current, desired));
+  }
+
+  @Test
+  void differsIsTrueWhenActiveFlagDiverges() {
+    User current = KeycloakUserMapper.toScimUser(representation("bjensen", null, null, null, true), "kc-1");
+    User desired = KeycloakUserMapper.toScimUser(representation("bjensen", null, null, null, false), "kc-1");
+
+    assertTrue(KeycloakUserMapper.differs(current, desired));
+  }
+
+  @Test
+  void differsIsTrueWhenPrimaryEmailDiverges() {
+    User current =
+        KeycloakUserMapper.toScimUser(
+            representation("bjensen", null, null, "old@example.com", true), "kc-1");
+    User desired =
+        KeycloakUserMapper.toScimUser(
+            representation("bjensen", null, null, "new@example.com", true), "kc-1");
+
+    assertTrue(KeycloakUserMapper.differs(current, desired));
+  }
+
+  @Test
+  void differsIgnoresFieldsItDoesNotManage() {
+    User current = KeycloakUserMapper.toScimUser(representation("bjensen", null, null, null, true), "kc-1");
+    current.setPhoneNumbers(
+        List.of(
+            de.captaingoldfish.scim.sdk.common.resources.multicomplex.PhoneNumber.builder()
+                .value("+1-555-0100")
+                .build()));
+    User desired = KeycloakUserMapper.toScimUser(representation("bjensen", null, null, null, true), "kc-1");
+
+    assertFalse(KeycloakUserMapper.differs(current, desired));
   }
 }
