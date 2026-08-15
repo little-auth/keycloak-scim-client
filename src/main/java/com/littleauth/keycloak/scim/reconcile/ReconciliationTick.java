@@ -22,7 +22,7 @@ import org.keycloak.models.utils.KeycloakModelUtils;
  * reconciliation, and any other plugin's timer-scheduled work, across every realm if one
  * target hangs).
  *
- * <p>{@link #inFlightRealmIds} skips a realm the tick would otherwise resubmit while its
+ * <p>{@link #IN_FLIGHT_REALM_IDS} skips a realm the tick would otherwise resubmit while its
  * previous page is still running -- a page's worst-case duration (up to {@code PAGE_SIZE}
  * users, each up to a couple of SCIM round trips at the client's configured timeouts) can
  * exceed the tick interval. Without this guard, two overlapping runs for the same realm
@@ -31,6 +31,18 @@ import org.keycloak.models.utils.KeycloakModelUtils;
  * overlap was never a correctness hazard, but it is a real, easily-avoided waste of outbound
  * calls against the target -- found and fixed during this change's own review, not left as a
  * documented limitation.
+ *
+ * <p><b>Known limitation, explicitly out of this change's scope:</b> {@link
+ * #IN_FLIGHT_REALM_IDS} is JVM-local. On a clustered (HA) Keycloak deployment, every node
+ * runs its own timer and its own copy of this set, so the guard does not prevent two
+ * *different nodes* from processing the same realm concurrently -- unlike the single-node
+ * overlap case above, a cross-node race widens the duplicate-create window past what the
+ * mapping table's unique constraint can catch (the outbound SCIM {@code POST} can already
+ * have landed on the target before either node's local constraint would fire). Keycloak's
+ * own {@code ClusterAwareScheduledTaskRunner}/{@code ClusterProvider} is the documented
+ * answer to this class of problem; adopting it is real, valuable follow-up work, not
+ * something this ticket's scope (pagination/checkpointing and the N6/N7 version-check race)
+ * committed to solving.
  */
 final class ReconciliationTick {
 
@@ -51,14 +63,23 @@ final class ReconciliationTick {
                 + " this tick -- its previous page is still running");
         continue;
       }
-      executor.submit(
-          () -> {
-            try {
-              runForRealm(sessionFactory, realmId);
-            } finally {
-              IN_FLIGHT_REALM_IDS.remove(realmId);
-            }
-          });
+      try {
+        executor.submit(
+            () -> {
+              try {
+                runForRealm(sessionFactory, realmId);
+              } finally {
+                IN_FLIGHT_REALM_IDS.remove(realmId);
+              }
+            });
+      } catch (RuntimeException e) {
+        // submit() itself threw (e.g. RejectedExecutionException after the executor has
+        // been shut down) -- the runnable above never ran, so its own finally never fired.
+        // Without this, realmId would stay marked in-flight forever, silently blocking
+        // this realm's reconciliation on every future tick for the life of the JVM.
+        IN_FLIGHT_REALM_IDS.remove(realmId);
+        LOGGER.log(Level.WARNING, "SCIM reconciliation: failed to submit realm " + realmId, e);
+      }
     }
   }
 
