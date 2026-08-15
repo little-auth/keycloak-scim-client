@@ -264,12 +264,12 @@ public class ScimEventListenerProvider implements EventListenerProvider {
   }
 
   /**
-   * Bearer still passes its header per-request (no client-level convenience method for it
-   * in this SDK, unlike Basic's {@code .basic(...)}) -- see {@link ScimTargetClient}'s doc
-   * for why client-level header config proved unreliable in this SDK version. Basic auth
-   * leaves this map empty on purpose: an explicit {@code Authorization} header here would
-   * collide with the client-level {@code BasicAuth} set in {@link #buildScimClientConfig},
-   * which only applies when the outgoing request doesn't already carry one.
+   * Bearer still passes its header per-request: this SDK has no client-level convenience
+   * for a bearer token the way {@code ScimClientConfig.builder().basic(...)} exists for
+   * Basic auth (see {@link ScimTargetClient}'s doc). Basic auth leaves this map empty on
+   * purpose: an explicit {@code Authorization} header here would collide with the
+   * client-level {@code BasicAuth} set in {@link #buildScimClientConfig}, which only
+   * applies when the outgoing request doesn't already carry one.
    */
   Map<String, String> buildAuthHeaders(ScimTargetConfig config, String credential) {
     return config.getAuthMode() == ScimTargetConfig.AuthMode.BASIC
