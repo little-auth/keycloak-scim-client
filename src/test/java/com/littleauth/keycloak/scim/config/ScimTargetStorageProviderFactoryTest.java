@@ -99,4 +99,21 @@ class ScimTargetStorageProviderFactoryTest {
     assertDoesNotThrow(
         () -> factory.validateConfiguration(session, realm, new ComponentModel()));
   }
+
+  /**
+   * Council code-review confirmation-pass finding: the LIST_TYPE dropdown only constrains the
+   * Admin Console UI, not an Admin REST API caller -- an invalid deletePolicy value must fail
+   * as a clean ComponentValidationException, not an unwrapped IllegalArgumentException from
+   * DeletePolicy.valueOf() (which validateConfiguration's contract doesn't declare and Keycloak
+   * won't render as an actionable admin-facing message).
+   */
+  @Test
+  void rejectsInvalidDeletePolicyValueAsComponentValidationExceptionNotIllegalArgument() {
+    ComponentModel model = new ComponentModel();
+    model.put(ScimTargetConfig.KEY_DELETE_POLICY, "GARBAGE");
+
+    assertThrows(
+        ComponentValidationException.class,
+        () -> factory.validateConfiguration(session, realm, model));
+  }
 }

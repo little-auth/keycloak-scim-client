@@ -1,5 +1,6 @@
 package com.littleauth.keycloak.scim.config;
 
+import java.util.Arrays;
 import java.util.List;
 import org.keycloak.Config;
 import org.keycloak.component.ComponentModel;
@@ -98,7 +99,21 @@ public class ScimTargetStorageProviderFactory
   public void validateConfiguration(KeycloakSession session, RealmModel realm, ComponentModel model)
       throws ComponentValidationException {
     var config = new ScimTargetConfig(model);
-    if (config.getDeletePolicy() == ScimTargetConfig.DeletePolicy.HARD_DELETE
+    ScimTargetConfig.DeletePolicy deletePolicy;
+    try {
+      deletePolicy = config.getDeletePolicy();
+    } catch (IllegalArgumentException e) {
+      // The LIST_TYPE config property only constrains the Admin Console UI's dropdown, not
+      // an Admin REST API caller -- an invalid value must fail as a clean, admin-actionable
+      // ComponentValidationException, not an unwrapped enum-parsing IllegalArgumentException.
+      throw new ComponentValidationException(
+          "Invalid "
+              + ScimTargetConfig.KEY_DELETE_POLICY
+              + " value -- must be one of "
+              + Arrays.toString(ScimTargetConfig.DeletePolicy.values()),
+          e);
+    }
+    if (deletePolicy == ScimTargetConfig.DeletePolicy.HARD_DELETE
         && !config.isHardDeleteConfirmed(realm)) {
       throw new ComponentValidationException(
           "Hard-delete mode permanently removes the user's SCIM resource on every Keycloak "
