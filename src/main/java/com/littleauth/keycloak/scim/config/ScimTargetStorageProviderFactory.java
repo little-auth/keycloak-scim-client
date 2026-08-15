@@ -124,11 +124,10 @@ public class ScimTargetStorageProviderFactory
       }
     } else if (model.getConfig().containsKey(ScimTargetConfig.KEY_HARD_DELETE_CONFIRMATION)) {
       // Every save that leaves (or never enters) HARD_DELETE clears any stored confirmation
-      // value -- otherwise a stale, previously-valid phrase would silently re-arm HARD_DELETE
-      // on a later flip back with no re-confirmation, exactly the bare-toggle bypass this
-      // gate exists to close (adversarial-confirmation-pass finding, not caught by the
-      // council rounds: HARD_DELETE -> SOFT_DELETE -> HARD_DELETE re-enabled with zero
-      // friction the second time).
+      // value. Without this, an admin who armed HARD_DELETE once, backed it out to
+      // SOFT_DELETE, and later flips the dropdown back to HARD_DELETE would re-enable it off
+      // the leftover phrase with zero friction -- exactly the bare-toggle bypass this gate
+      // exists to close, just reachable on a later save instead of the first one.
       model.getConfig().remove(ScimTargetConfig.KEY_HARD_DELETE_CONFIRMATION);
     }
     String targetUrl = config.getTargetUrl();

@@ -163,9 +163,9 @@ class ScimTargetConfigTest {
   }
 
   /**
-   * Adversarial-confirmation-pass finding: a realm name carrying incidental surrounding
-   * whitespace must not produce a required phrase no trimmed admin-typed input could ever
-   * match -- that would permanently block HARD_DELETE for that realm.
+   * A realm name carrying incidental surrounding whitespace must not produce a required
+   * phrase no trimmed admin-typed input could ever match -- that would permanently block
+   * HARD_DELETE for that realm.
    */
   @Test
   void requiredHardDeleteConfirmationPhraseTrimsTheRealmNameToo() {

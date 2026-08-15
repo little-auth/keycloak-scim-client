@@ -102,11 +102,11 @@ class ScimTargetStorageProviderFactoryTest {
   }
 
   /**
-   * Council code-review confirmation-pass finding: the LIST_TYPE dropdown only constrains the
-   * Admin Console UI, not an Admin REST API caller -- an invalid deletePolicy value must fail
-   * as a clean ComponentValidationException, not an unwrapped IllegalArgumentException from
-   * DeletePolicy.valueOf() (which validateConfiguration's contract doesn't declare and Keycloak
-   * won't render as an actionable admin-facing message).
+   * The LIST_TYPE dropdown only constrains the Admin Console UI, not an Admin REST API
+   * caller -- an invalid deletePolicy value must fail as a clean ComponentValidationException,
+   * not an unwrapped IllegalArgumentException from DeletePolicy.valueOf() (which
+   * validateConfiguration's contract doesn't declare and Keycloak won't render as an
+   * actionable admin-facing message).
    */
   @Test
   void rejectsInvalidDeletePolicyValueAsComponentValidationExceptionNotIllegalArgument() {
@@ -119,10 +119,10 @@ class ScimTargetStorageProviderFactoryTest {
   }
 
   /**
-   * Adversarial-confirmation-pass finding: nothing ever cleared a stale, previously-valid
-   * confirmation phrase when the policy left HARD_DELETE, so a later flip back to
-   * HARD_DELETE silently re-armed off the leftover value -- exactly the bare-toggle bypass
-   * issue #7 exists to close, just one save later instead of the first one.
+   * Nothing ever cleared a stale, previously-valid confirmation phrase when the policy left
+   * HARD_DELETE, so a later flip back to HARD_DELETE silently re-armed off the leftover
+   * value -- exactly the bare-toggle bypass issue #7 exists to close, just one save later
+   * instead of the first one.
    */
   @Test
   void reEnablingHardDeleteAfterSwitchingAwayRequiresFreshConfirmation() {
