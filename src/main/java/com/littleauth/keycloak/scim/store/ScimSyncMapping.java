@@ -26,7 +26,14 @@ import java.util.regex.Pattern;
 public class ScimSyncMapping {
 
   private static final int MAX_ERROR_LENGTH = 1024;
-  private static final Pattern BEARER_TOKEN = Pattern.compile("Bearer\\s+\\S+");
+
+  // Covers every AuthMode this plugin currently supports (Bearer and Basic). This is the
+  // one place a raw HTTP error body from the SCIM target lands in storage, so a future
+  // AuthMode's HTTP auth scheme name must be added here in the same change that adds the
+  // mode -- an unredacted scheme leaks a trivially-reversible credential into the DB and
+  // logs the moment a target echoes the Authorization header back in an error body.
+  private static final Pattern CREDENTIAL_HEADER =
+      Pattern.compile("(?i)(Bearer|Basic)\\s+\\S+");
 
   @Id
   @Column(name = "ID", length = 36)
@@ -115,13 +122,16 @@ public class ScimSyncMapping {
     return lastSyncError;
   }
 
-  /** Redacts any {@code Bearer <token>} substring and truncates to the column length. */
+  /**
+   * Redacts any {@code Bearer <token>} or {@code Basic <credential>} substring and
+   * truncates to the column length.
+   */
   public void setLastSyncError(String rawMessage) {
     if (rawMessage == null) {
       this.lastSyncError = null;
       return;
     }
-    String redacted = BEARER_TOKEN.matcher(rawMessage).replaceAll("Bearer [redacted]");
+    String redacted = CREDENTIAL_HEADER.matcher(rawMessage).replaceAll("$1 [redacted]");
     this.lastSyncError =
         redacted.length() > MAX_ERROR_LENGTH ? redacted.substring(0, MAX_ERROR_LENGTH) : redacted;
   }
