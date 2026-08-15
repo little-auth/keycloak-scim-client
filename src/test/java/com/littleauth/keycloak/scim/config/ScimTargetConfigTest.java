@@ -124,6 +124,14 @@ class ScimTargetConfigTest {
   }
 
   @Test
+  void getDeletePolicyDefaultsToSoftDeleteWhenExplicitlySetToAnEmptyList() {
+    ComponentModel model = new ComponentModel();
+    model.getConfig().put(ScimTargetConfig.KEY_DELETE_POLICY, List.of());
+    var config = new ScimTargetConfig(model);
+    assertEquals(ScimTargetConfig.DeletePolicy.SOFT_DELETE, config.getDeletePolicy());
+  }
+
+  @Test
   void syncEnabledDefaultsToFalse() {
     var config = new ScimTargetConfig(new ComponentModel());
     assertFalse(config.isSyncEnabled());
