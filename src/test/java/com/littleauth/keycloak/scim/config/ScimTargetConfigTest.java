@@ -116,4 +116,44 @@ class ScimTargetConfigTest {
     var config = new ScimTargetConfig(model);
     assertTrue(config.isSyncEnabled());
   }
+
+  @Test
+  void authModeDefaultsToBearerWhenKeyIsEntirelyAbsent() {
+    // Every pre-existing production realm has no authMode key at all -- this default
+    // path is what keeps every already-shipped Bearer-only config working post-upgrade.
+    var config = new ScimTargetConfig(new ComponentModel());
+    assertEquals(ScimTargetConfig.AuthMode.BEARER, config.getAuthMode());
+  }
+
+  @Test
+  void authModeDefaultsToBearerWhenValueIsBlankNotJustAbsent() {
+    // A Keycloak form re-save could plausibly turn "key absent" into "key present but
+    // empty string" for a newly-added LIST_TYPE property -- must not throw.
+    ComponentModel model = new ComponentModel();
+    model.put(ScimTargetConfig.KEY_AUTH_MODE, "");
+    var config = new ScimTargetConfig(model);
+    assertEquals(ScimTargetConfig.AuthMode.BEARER, config.getAuthMode());
+  }
+
+  @Test
+  void authModeHonorsExplicitBasicConfiguration() {
+    ComponentModel model = new ComponentModel();
+    model.put(ScimTargetConfig.KEY_AUTH_MODE, "BASIC");
+    var config = new ScimTargetConfig(model);
+    assertEquals(ScimTargetConfig.AuthMode.BASIC, config.getAuthMode());
+  }
+
+  @Test
+  void getUsernameReturnsNullWhenUnset() {
+    var config = new ScimTargetConfig(new ComponentModel());
+    assertEquals(null, config.getUsername());
+  }
+
+  @Test
+  void getUsernameReturnsTheConfiguredValue() {
+    ComponentModel model = new ComponentModel();
+    model.put(ScimTargetConfig.KEY_USERNAME, "svc-account");
+    var config = new ScimTargetConfig(model);
+    assertEquals("svc-account", config.getUsername());
+  }
 }
