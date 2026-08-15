@@ -155,7 +155,7 @@ class ScimTargetConfigTest {
   }
 
   @Test
-  void isHardDeleteConfirmedTrimsSurroundingWhitespaceButStaysCaseSensitive() {
+  void isHardDeleteConfirmedTrimsSurroundingWhitespace() {
     ComponentModel model = new ComponentModel();
     model.put(ScimTargetConfig.KEY_HARD_DELETE_CONFIRMATION, "  ENABLE HARD DELETE FOR ACME  ");
     var config = new ScimTargetConfig(model);
@@ -163,10 +163,11 @@ class ScimTargetConfigTest {
   }
 
   @Test
-  void isHardDeleteConfirmedRejectsWrongCaseOrWrongRealmName() {
+  void isHardDeleteConfirmedIsCaseSensitive() {
     ComponentModel model = new ComponentModel();
     model.put(ScimTargetConfig.KEY_HARD_DELETE_CONFIRMATION, "enable hard delete for acme-realm");
     var config = new ScimTargetConfig(model);
+    // Same realm, same text modulo case -- the mismatch here is case alone, not realm name.
     assertFalse(config.isHardDeleteConfirmed(realmNamed("Acme-Realm")));
   }
 }
