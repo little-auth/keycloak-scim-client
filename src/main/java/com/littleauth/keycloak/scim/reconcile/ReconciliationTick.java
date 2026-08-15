@@ -72,13 +72,19 @@ final class ReconciliationTick {
                 IN_FLIGHT_REALM_IDS.remove(realmId);
               }
             });
-      } catch (RuntimeException e) {
-        // submit() itself threw (e.g. RejectedExecutionException after the executor has
-        // been shut down) -- the runnable above never ran, so its own finally never fired.
-        // Without this, realmId would stay marked in-flight forever, silently blocking
-        // this realm's reconciliation on every future tick for the life of the JVM.
+      } catch (Throwable t) {
+        // submit() itself threw -- e.g. RejectedExecutionException after the executor has
+        // been shut down, or (the reason this is Throwable, not RuntimeException)
+        // OutOfMemoryError: unable to create native thread, a realistic production failure
+        // mode for Executors.newFixedThreadPool's lazy thread creation. Either way the
+        // runnable above never ran, so its own finally never fired: without this, realmId
+        // would stay marked in-flight forever, silently blocking this realm's
+        // reconciliation on every future tick for the life of the JVM. Runs on the timer
+        // thread (see DefaultReconciliationSchedulerProviderFactory.runTickIsolated for why
+        // that boundary already catches Throwable too) so re-throwing an Error here would
+        // be just as unsafe as leaving it uncaught there.
         IN_FLIGHT_REALM_IDS.remove(realmId);
-        LOGGER.log(Level.WARNING, "SCIM reconciliation: failed to submit realm " + realmId, e);
+        LOGGER.log(Level.WARNING, "SCIM reconciliation: failed to submit realm " + realmId, t);
       }
     }
   }
