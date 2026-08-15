@@ -221,6 +221,23 @@ class ScimEventListenerProviderTest {
   }
 
   @Test
+  void buildScimClientConfigAllowsColonInPassword() {
+    // RFC 7617 SS2 only restricts the userid, never the password -- a server splitting
+    // on the *first* colon has no ambiguity about where the password starts. Locks in
+    // that the colon check is scoped to username, not credential, against a future
+    // maintainer accidentally over-restricting both.
+    ComponentModel model = new ComponentModel();
+    model.put(ScimTargetConfig.KEY_AUTH_MODE, "BASIC");
+    model.put(ScimTargetConfig.KEY_USERNAME, "alice");
+    var config = new ScimTargetConfig(model);
+
+    ScimClientConfig clientConfig = provider.buildScimClientConfig(config, "p:a:ss");
+
+    assertEquals(
+        "Basic YWxpY2U6cDphOnNz", clientConfig.getBasicAuth().getAuthorizationHeaderValue());
+  }
+
+  @Test
   void buildScimClientConfigSetsBasicAuthWhenAuthModeIsBasic() {
     ComponentModel model = new ComponentModel();
     model.put(ScimTargetConfig.KEY_AUTH_MODE, "BASIC");
