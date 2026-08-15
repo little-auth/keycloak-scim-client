@@ -1,12 +1,16 @@
 package com.littleauth.keycloak.scim.client;
 
 import com.fasterxml.jackson.databind.node.BooleanNode;
+import com.littleauth.keycloak.scim.client.ReconciliationWriteResult.Outcome;
 import com.littleauth.keycloak.scim.config.ScimTargetConfig.DeletePolicy;
 import de.captaingoldfish.scim.sdk.client.ScimRequestBuilder;
+import de.captaingoldfish.scim.sdk.client.builder.UpdateBuilder;
 import de.captaingoldfish.scim.sdk.client.response.ServerResponse;
 import de.captaingoldfish.scim.sdk.common.constants.enums.PatchOp;
 import de.captaingoldfish.scim.sdk.common.resources.ServiceProvider;
 import de.captaingoldfish.scim.sdk.common.resources.User;
+import de.captaingoldfish.scim.sdk.common.resources.complex.Meta;
+import de.captaingoldfish.scim.sdk.common.response.ListResponse;
 import java.util.Map;
 
 /**
@@ -77,6 +81,63 @@ public class ScimTargetClient implements AutoCloseable {
         .sendRequest(authHeaders);
   }
 
+  /** Plain GET of a User resource by its SCIM id. */
+  public ServerResponse<User> getUser(String scimId) {
+    return requestBuilder.get(User.class, USERS_ENDPOINT, scimId).sendRequest(authHeaders);
+  }
+
+  /**
+   * Reconciliation's duplicate-create guard (issue #6): before self-healing a missing
+   * mapping by creating a new resource, check whether one already exists on the target for
+   * this Keycloak user -- closes the window where an event-driven create (N6) and a
+   * reconciliation create for the same user race across two separate transactions, each
+   * observing no mapping yet and each calling create.
+   */
+  public ServerResponse<ListResponse<User>> findByExternalId(String keycloakUserId) {
+    return requestBuilder
+        .list(User.class, USERS_ENDPOINT)
+        .filter(externalIdEqualsFilter(keycloakUserId))
+        .get()
+        .sendRequest(authHeaders);
+  }
+
+  private static String externalIdEqualsFilter(String keycloakUserId) {
+    String escaped = keycloakUserId.replace("\\", "\\\\").replace("\"", "\\\"");
+    return "externalId eq \"" + escaped + "\"";
+  }
+
+  /**
+   * Applies a reconciliation diff-derived full PUT replace, but only after checking the
+   * target's {@code meta.version} hasn't moved since {@code expectedMeta} was read (issue
+   * #6: the N6/N7 race -- an event-driven write landing between reconciliation's read and
+   * its write must not be silently overwritten). Passes {@code If-Match} when the target
+   * advertises a version, so a target that honors conditional requests gets true atomicity;
+   * either way, a 412/409 response is reported as {@link Outcome#VERSION_CONFLICT} rather
+   * than treated as a generic failure, so the caller skips instead of retrying blindly.
+   *
+   * <p>{@code desired} must already be the full desired resource (built by fetching the
+   * current resource and merging Keycloak-sourced fields onto it -- see {@code
+   * KeycloakUserMapper#mergeOnto} -- never a bare, partially-populated {@code User}, which
+   * would wipe target-only fields via SCIM's full-replace PUT semantics).
+   */
+  public ReconciliationWriteResult replaceIfVersionUnchanged(
+      String scimId, User desired, Meta expectedMeta) {
+    UpdateBuilder<User> updateBuilder =
+        requestBuilder.update(User.class, USERS_ENDPOINT, scimId).setResource(desired.toString());
+    if (expectedMeta != null) {
+      expectedMeta.getVersion().ifPresent(updateBuilder::setETagForIfMatch);
+    }
+    ServerResponse<User> response = updateBuilder.sendRequest(authHeaders);
+    if (response.isSuccess()) {
+      return new ReconciliationWriteResult(Outcome.APPLIED, response);
+    }
+    Integer status = response.getHttpStatus();
+    if (status != null && (status == 412 || status == 409)) {
+      return new ReconciliationWriteResult(Outcome.VERSION_CONFLICT, response);
+    }
+    return new ReconciliationWriteResult(Outcome.FAILED, response);
+  }
+
   /** Hard DELETE of a User resource; only invoked when the realm is configured for it. */
   public ServerResponse<User> deleteUser(String scimId) {
     return requestBuilder.delete(User.class, USERS_ENDPOINT, scimId).sendRequest(authHeaders);
@@ -118,8 +179,7 @@ public class ScimTargetClient implements AutoCloseable {
   }
 
   private ServerResponse<User> replaceActiveViaFetchAndPut(String scimId, boolean active) {
-    ServerResponse<User> current =
-        requestBuilder.get(User.class, USERS_ENDPOINT, scimId).sendRequest(authHeaders);
+    ServerResponse<User> current = getUser(scimId);
     if (!current.isSuccess()) {
       // Can't safely PUT without the current state -- surface the GET failure rather
       // than risk wiping fields with an incomplete replace.

@@ -15,10 +15,14 @@ import com.littleauth.keycloak.scim.config.ScimTargetConfig.DeletePolicy;
 import de.captaingoldfish.scim.sdk.client.ScimRequestBuilder;
 import de.captaingoldfish.scim.sdk.client.builder.DeleteBuilder;
 import de.captaingoldfish.scim.sdk.client.builder.GetBuilder;
+import de.captaingoldfish.scim.sdk.client.builder.ListBuilder;
 import de.captaingoldfish.scim.sdk.client.builder.PatchBuilder;
 import de.captaingoldfish.scim.sdk.client.builder.UpdateBuilder;
 import de.captaingoldfish.scim.sdk.client.response.ServerResponse;
+import de.captaingoldfish.scim.sdk.common.etag.ETag;
 import de.captaingoldfish.scim.sdk.common.resources.User;
+import de.captaingoldfish.scim.sdk.common.resources.complex.Meta;
+import de.captaingoldfish.scim.sdk.common.response.ListResponse;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -208,5 +212,129 @@ class ScimTargetClientTest {
 
     assertEquals(success, result);
     verify(requestBuilder, never()).delete(any(), any(), any());
+  }
+
+  @Test
+  void getUserSendsPlainGetByScimId() {
+    ScimRequestBuilder requestBuilder = mock(ScimRequestBuilder.class);
+    User resource = new User();
+    ServerResponse<User> success = successResponse();
+    when(success.getResource()).thenReturn(resource);
+    GetBuilder<User> getBuilder = mockGetBuilder(requestBuilder, "scim-123");
+    when(getBuilder.sendRequest(any())).thenReturn(success);
+
+    var client = new ScimTargetClient(requestBuilder, new PatchCapability(true), Map.of());
+    ServerResponse<User> result = client.getUser("scim-123");
+
+    assertEquals(success, result);
+  }
+
+  @SuppressWarnings("unchecked")
+  private static ListBuilder<User> mockListBuilder(ScimRequestBuilder requestBuilder) {
+    ListBuilder<User> listBuilder = mock(ListBuilder.class);
+    when(requestBuilder.list(User.class, "/Users")).thenReturn(listBuilder);
+    when(listBuilder.filter(anyString())).thenReturn(listBuilder);
+    return listBuilder;
+  }
+
+  @SuppressWarnings("unchecked")
+  private static ListBuilder.GetRequestBuilder<User> mockListGetRequestBuilder(
+      ListBuilder<User> listBuilder) {
+    ListBuilder.GetRequestBuilder<User> getRequestBuilder = mock(ListBuilder.GetRequestBuilder.class);
+    when(listBuilder.get()).thenReturn(getRequestBuilder);
+    return getRequestBuilder;
+  }
+
+  @Test
+  void findByExternalIdFiltersOnExternalIdEquality() {
+    ScimRequestBuilder requestBuilder = mock(ScimRequestBuilder.class);
+    ListBuilder<User> listBuilder = mockListBuilder(requestBuilder);
+    ListBuilder.GetRequestBuilder<User> getRequestBuilder = mockListGetRequestBuilder(listBuilder);
+
+    ServerResponse<ListResponse<User>> success = mock(ServerResponse.class);
+    when(getRequestBuilder.sendRequest(any())).thenReturn(success);
+
+    var client = new ScimTargetClient(requestBuilder, new PatchCapability(true), Map.of());
+    ServerResponse<ListResponse<User>> result = client.findByExternalId("kc-user-1");
+
+    assertEquals(success, result);
+    verify(listBuilder).filter("externalId eq \"kc-user-1\"");
+  }
+
+  @Test
+  void findByExternalIdEscapesQuotesAndBackslashesInTheFilterValue() {
+    ScimRequestBuilder requestBuilder = mock(ScimRequestBuilder.class);
+    ListBuilder<User> listBuilder = mockListBuilder(requestBuilder);
+    ListBuilder.GetRequestBuilder<User> getRequestBuilder = mockListGetRequestBuilder(listBuilder);
+    ServerResponse<ListResponse<User>> success = mock(ServerResponse.class);
+    when(getRequestBuilder.sendRequest(any())).thenReturn(success);
+
+    var client = new ScimTargetClient(requestBuilder, new PatchCapability(true), Map.of());
+    client.findByExternalId("weird\"\\id");
+
+    verify(listBuilder).filter("externalId eq \"weird\\\"\\\\id\"");
+  }
+
+  @Test
+  void replaceIfVersionUnchangedAppliesWithIfMatchWhenAnExpectedVersionIsPresent() {
+    ScimRequestBuilder requestBuilder = mock(ScimRequestBuilder.class);
+    UpdateBuilder<User> updateBuilder = mockUpdateBuilder(requestBuilder, "scim-123");
+    ServerResponse<User> putSuccess = successResponse();
+    when(updateBuilder.sendRequest(any())).thenReturn(putSuccess);
+
+    ETag version = ETag.parseETag("\"v1\"");
+    Meta expectedMeta = Meta.builder().version(version).build();
+
+    var client = new ScimTargetClient(requestBuilder, new PatchCapability(true), Map.of());
+    User desired = new User();
+    ReconciliationWriteResult result =
+        client.replaceIfVersionUnchanged("scim-123", desired, expectedMeta);
+
+    assertEquals(ReconciliationWriteResult.Outcome.APPLIED, result.outcome());
+    assertEquals(putSuccess, result.response());
+    verify(updateBuilder).setETagForIfMatch(version);
+  }
+
+  @Test
+  void replaceIfVersionUnchangedDoesNotSetIfMatchWhenNoVersionIsAdvertised() {
+    ScimRequestBuilder requestBuilder = mock(ScimRequestBuilder.class);
+    UpdateBuilder<User> updateBuilder = mockUpdateBuilder(requestBuilder, "scim-123");
+    ServerResponse<User> putSuccess = successResponse();
+    when(updateBuilder.sendRequest(any())).thenReturn(putSuccess);
+
+    var client = new ScimTargetClient(requestBuilder, new PatchCapability(true), Map.of());
+    ReconciliationWriteResult result =
+        client.replaceIfVersionUnchanged("scim-123", new User(), null);
+
+    assertEquals(ReconciliationWriteResult.Outcome.APPLIED, result.outcome());
+    verify(updateBuilder, never()).setETagForIfMatch(any(ETag.class));
+  }
+
+  @Test
+  void replaceIfVersionUnchangedReportsVersionConflictOn412() {
+    ScimRequestBuilder requestBuilder = mock(ScimRequestBuilder.class);
+    UpdateBuilder<User> updateBuilder = mockUpdateBuilder(requestBuilder, "scim-123");
+    ServerResponse<User> preconditionFailed = errorResponse(412);
+    when(updateBuilder.sendRequest(any())).thenReturn(preconditionFailed);
+
+    var client = new ScimTargetClient(requestBuilder, new PatchCapability(true), Map.of());
+    ReconciliationWriteResult result =
+        client.replaceIfVersionUnchanged("scim-123", new User(), null);
+
+    assertEquals(ReconciliationWriteResult.Outcome.VERSION_CONFLICT, result.outcome());
+  }
+
+  @Test
+  void replaceIfVersionUnchangedReportsFailedOnAnUnrelatedError() {
+    ScimRequestBuilder requestBuilder = mock(ScimRequestBuilder.class);
+    UpdateBuilder<User> updateBuilder = mockUpdateBuilder(requestBuilder, "scim-123");
+    ServerResponse<User> serverError = errorResponse(503);
+    when(updateBuilder.sendRequest(any())).thenReturn(serverError);
+
+    var client = new ScimTargetClient(requestBuilder, new PatchCapability(true), Map.of());
+    ReconciliationWriteResult result =
+        client.replaceIfVersionUnchanged("scim-123", new User(), null);
+
+    assertEquals(ReconciliationWriteResult.Outcome.FAILED, result.outcome());
   }
 }
