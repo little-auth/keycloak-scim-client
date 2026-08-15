@@ -23,6 +23,7 @@ import de.captaingoldfish.scim.sdk.common.etag.ETag;
 import de.captaingoldfish.scim.sdk.common.resources.User;
 import de.captaingoldfish.scim.sdk.common.resources.complex.Meta;
 import de.captaingoldfish.scim.sdk.common.response.ListResponse;
+import java.time.Instant;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -308,6 +309,80 @@ class ScimTargetClientTest {
 
     assertEquals(ReconciliationWriteResult.Outcome.APPLIED, result.outcome());
     verify(updateBuilder, never()).setETagForIfMatch(any(ETag.class));
+  }
+
+  @Test
+  void replaceIfVersionUnchangedRechecksLastModifiedWhenNoEtagAdvertisedAndAppliesWhenUnchanged() {
+    // The only check possible against a target with no ETag support (issue #6: this is the
+    // real-world case for scimitar, the plugin's own test target, per issue #5) -- a fresh
+    // GET immediately before the write, compared against what was read earlier.
+    ScimRequestBuilder requestBuilder = mock(ScimRequestBuilder.class);
+    Instant lastModified = Instant.parse("2026-08-15T10:00:00Z");
+    Meta expectedMeta = new Meta();
+    expectedMeta.setLastModified(lastModified);
+
+    User rechecked = new User();
+    Meta recheckedMeta = new Meta();
+    recheckedMeta.setLastModified(lastModified);
+    rechecked.setMeta(recheckedMeta);
+    ServerResponse<User> recheckResponse = successResponse();
+    when(recheckResponse.getResource()).thenReturn(rechecked);
+    GetBuilder<User> getBuilder = mockGetBuilder(requestBuilder, "scim-123");
+    when(getBuilder.sendRequest(any())).thenReturn(recheckResponse);
+
+    UpdateBuilder<User> updateBuilder = mockUpdateBuilder(requestBuilder, "scim-123");
+    ServerResponse<User> putSuccess = successResponse();
+    when(updateBuilder.sendRequest(any())).thenReturn(putSuccess);
+
+    var client = new ScimTargetClient(requestBuilder, new PatchCapability(true), Map.of());
+    ReconciliationWriteResult result =
+        client.replaceIfVersionUnchanged("scim-123", new User(), expectedMeta);
+
+    assertEquals(ReconciliationWriteResult.Outcome.APPLIED, result.outcome());
+    verify(updateBuilder, never()).setETagForIfMatch(any(ETag.class));
+  }
+
+  @Test
+  void replaceIfVersionUnchangedReportsConflictWhenLastModifiedChangedSinceRead() {
+    ScimRequestBuilder requestBuilder = mock(ScimRequestBuilder.class);
+    Meta expectedMeta = new Meta();
+    expectedMeta.setLastModified(Instant.parse("2026-08-15T10:00:00Z"));
+
+    User rechecked = new User();
+    Meta recheckedMeta = new Meta();
+    recheckedMeta.setLastModified(Instant.parse("2026-08-15T10:05:00Z"));
+    rechecked.setMeta(recheckedMeta);
+    ServerResponse<User> recheckResponse = successResponse();
+    when(recheckResponse.getResource()).thenReturn(rechecked);
+    GetBuilder<User> getBuilder = mockGetBuilder(requestBuilder, "scim-123");
+    when(getBuilder.sendRequest(any())).thenReturn(recheckResponse);
+
+    var client = new ScimTargetClient(requestBuilder, new PatchCapability(true), Map.of());
+    ReconciliationWriteResult result =
+        client.replaceIfVersionUnchanged("scim-123", new User(), expectedMeta);
+
+    assertEquals(ReconciliationWriteResult.Outcome.VERSION_CONFLICT, result.outcome());
+    // Must never PUT once a concurrent modification is detected -- that would silently
+    // overwrite whatever the concurrent writer just did.
+    verify(requestBuilder, never()).update(any(), any(), any());
+  }
+
+  @Test
+  void replaceIfVersionUnchangedSurfacesRecheckFailureAsFailedWithoutWriting() {
+    ScimRequestBuilder requestBuilder = mock(ScimRequestBuilder.class);
+    Meta expectedMeta = new Meta();
+    expectedMeta.setLastModified(Instant.parse("2026-08-15T10:00:00Z"));
+
+    ServerResponse<User> recheckFailure = errorResponse(500);
+    GetBuilder<User> getBuilder = mockGetBuilder(requestBuilder, "scim-123");
+    when(getBuilder.sendRequest(any())).thenReturn(recheckFailure);
+
+    var client = new ScimTargetClient(requestBuilder, new PatchCapability(true), Map.of());
+    ReconciliationWriteResult result =
+        client.replaceIfVersionUnchanged("scim-123", new User(), expectedMeta);
+
+    assertEquals(ReconciliationWriteResult.Outcome.FAILED, result.outcome());
+    verify(requestBuilder, never()).update(any(), any(), any());
   }
 
   @Test

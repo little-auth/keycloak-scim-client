@@ -7,11 +7,14 @@ import de.captaingoldfish.scim.sdk.client.ScimRequestBuilder;
 import de.captaingoldfish.scim.sdk.client.builder.UpdateBuilder;
 import de.captaingoldfish.scim.sdk.client.response.ServerResponse;
 import de.captaingoldfish.scim.sdk.common.constants.enums.PatchOp;
+import de.captaingoldfish.scim.sdk.common.etag.ETag;
 import de.captaingoldfish.scim.sdk.common.resources.ServiceProvider;
 import de.captaingoldfish.scim.sdk.common.resources.User;
 import de.captaingoldfish.scim.sdk.common.resources.complex.Meta;
 import de.captaingoldfish.scim.sdk.common.response.ListResponse;
+import java.time.Instant;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Thin orchestration layer over {@code scim-sdk-client}: create/replace/delete Users, plus
@@ -108,12 +111,29 @@ public class ScimTargetClient implements AutoCloseable {
 
   /**
    * Applies a reconciliation diff-derived full PUT replace, but only after checking the
-   * target's {@code meta.version} hasn't moved since {@code expectedMeta} was read (issue
-   * #6: the N6/N7 race -- an event-driven write landing between reconciliation's read and
-   * its write must not be silently overwritten). Passes {@code If-Match} when the target
-   * advertises a version, so a target that honors conditional requests gets true atomicity;
-   * either way, a 412/409 response is reported as {@link Outcome#VERSION_CONFLICT} rather
-   * than treated as a generic failure, so the caller skips instead of retrying blindly.
+   * target's {@code meta.version}/{@code lastModified} hasn't moved since {@code
+   * expectedMeta} was read (issue #6: the N6/N7 race -- an event-driven write landing
+   * between reconciliation's read and its write must not be silently overwritten).
+   *
+   * <p>When the target advertises an ETag ({@code meta.version}), it's passed as {@code
+   * If-Match} so a target that honors conditional requests gets true server-enforced
+   * atomicity; a 412/409 response either way is reported as {@link
+   * Outcome#VERSION_CONFLICT} rather than a generic failure, so the caller skips instead of
+   * retrying blindly.
+   *
+   * <p>When no ETag was advertised but a {@code lastModified} timestamp was, this
+   * re-fetches the resource immediately before writing and compares timestamps client-side
+   * -- the only check available against a target with no conditional-request support (the
+   * real-world case for this plugin's own scimitar test target as of issue #5). This
+   * narrows, but -- being a plain read-then-write with no server-side atomicity -- does not
+   * fully eliminate, the race window; see the implementation ticket's residual-risk note.
+   *
+   * <p>If the original read carried neither signal at all, there is nothing to check
+   * against and the write proceeds unconditionally -- refusing forever would mean a target
+   * with no version/timestamp support could never be self-healed by reconciliation, which
+   * defeats its purpose. This is a materially different, much narrower gap than "no check
+   * happens for non-ETag targets," which is what a missing {@code lastModified} fallback
+   * would otherwise mean in practice.
    *
    * <p>{@code desired} must already be the full desired resource (built by fetching the
    * current resource and merging Keycloak-sourced fields onto it -- see {@code
@@ -122,11 +142,29 @@ public class ScimTargetClient implements AutoCloseable {
    */
   public ReconciliationWriteResult replaceIfVersionUnchanged(
       String scimId, User desired, Meta expectedMeta) {
+    Optional<ETag> etag = expectedMeta == null ? Optional.empty() : expectedMeta.getVersion();
+    if (etag.isEmpty()) {
+      Optional<Instant> expectedLastModified =
+          expectedMeta == null ? Optional.empty() : expectedMeta.getLastModified();
+      if (expectedLastModified.isPresent()) {
+        ServerResponse<User> recheck = getUser(scimId);
+        if (!recheck.isSuccess()) {
+          return new ReconciliationWriteResult(Outcome.FAILED, recheck);
+        }
+        Optional<Instant> currentLastModified =
+            recheck.getResource().getMeta().flatMap(Meta::getLastModified);
+        if (!currentLastModified.equals(expectedLastModified)) {
+          return new ReconciliationWriteResult(Outcome.VERSION_CONFLICT, recheck);
+        }
+      }
+      // else: the target advertised neither a version nor a timestamp on the original
+      // read -- nothing to check against; proceed unconditionally rather than refuse to
+      // ever self-heal this target.
+    }
+
     UpdateBuilder<User> updateBuilder =
         requestBuilder.update(User.class, USERS_ENDPOINT, scimId).setResource(desired.toString());
-    if (expectedMeta != null) {
-      expectedMeta.getVersion().ifPresent(updateBuilder::setETagForIfMatch);
-    }
+    etag.ifPresent(updateBuilder::setETagForIfMatch);
     ServerResponse<User> response = updateBuilder.sendRequest(authHeaders);
     if (response.isSuccess()) {
       return new ReconciliationWriteResult(Outcome.APPLIED, response);
