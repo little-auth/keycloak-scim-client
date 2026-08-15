@@ -227,13 +227,54 @@ public class ScimEventListenerProvider implements EventListenerProvider {
     // the first one.
     new TargetUrlValidator(config.getAllowlistHosts()).validate(config.getTargetUrl());
     String credential = config.resolveCredential(session);
-    ScimClientConfig clientConfig =
-        ScimClientConfig.builder().connectTimeout(5).requestTimeout(10).socketTimeout(10).build();
+    ScimClientConfig clientConfig = buildScimClientConfig(config, credential);
     var requestBuilder = new ScimRequestBuilder(config.getTargetUrl(), clientConfig);
-    // Passed per-request via ScimTargetClient, not through ScimClientConfig -- see that
-    // class's doc for why client-level header config proved unreliable in this SDK version.
-    Map<String, String> authHeaders = Map.of("Authorization", "Bearer " + credential);
+    Map<String, String> authHeaders = buildAuthHeaders(config, credential);
     return new ScimTargetClient(requestBuilder, authHeaders);
+  }
+
+  /**
+   * Builds the SDK client config, wiring in HTTP Basic auth when {@link
+   * ScimTargetConfig#getAuthMode()} is {@link ScimTargetConfig.AuthMode#BASIC} --
+   * verified directly against {@code scim-sdk-client} 1.34.0's bytecode that {@code
+   * ScimHttpClient.sendRequest} applies this to every request (all HTTP methods funnel
+   * through that one method) whenever the request doesn't already carry an explicit
+   * {@code Authorization} header, which is exactly what {@link #buildAuthHeaders} leaves
+   * true for Basic mode.
+   *
+   * <p>Rejects a blank username here rather than trusting config-save-time validation
+   * ({@code ScimTargetStorageProviderFactory.validateConfiguration}) alone: {@code
+   * BasicAuth.getAuthorizationHeaderValue()} treats a {@code null} username as an empty
+   * string, not an error, so an unvalidated config would otherwise silently build a
+   * working-looking but wrong header instead of failing loudly -- the same class of
+   * silent 401 this auth mode existed to fix in the first place.
+   */
+  ScimClientConfig buildScimClientConfig(ScimTargetConfig config, String credential) {
+    var builder =
+        ScimClientConfig.builder().connectTimeout(5).requestTimeout(10).socketTimeout(10);
+    if (config.getAuthMode() == ScimTargetConfig.AuthMode.BASIC) {
+      String username = config.getUsername();
+      if (username == null || username.isBlank()) {
+        throw new IllegalStateException(
+            "Auth mode is Basic but no username is configured for this SCIM target");
+      }
+      builder.basic(username, credential);
+    }
+    return builder.build();
+  }
+
+  /**
+   * Bearer still passes its header per-request (no client-level convenience method for it
+   * in this SDK, unlike Basic's {@code .basic(...)}) -- see {@link ScimTargetClient}'s doc
+   * for why client-level header config proved unreliable in this SDK version. Basic auth
+   * leaves this map empty on purpose: an explicit {@code Authorization} header here would
+   * collide with the client-level {@code BasicAuth} set in {@link #buildScimClientConfig},
+   * which only applies when the outgoing request doesn't already carry one.
+   */
+  Map<String, String> buildAuthHeaders(ScimTargetConfig config, String credential) {
+    return config.getAuthMode() == ScimTargetConfig.AuthMode.BASIC
+        ? Map.of()
+        : Map.of("Authorization", "Bearer " + credential);
   }
 
   @Override

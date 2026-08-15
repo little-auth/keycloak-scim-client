@@ -15,8 +15,10 @@ import com.littleauth.keycloak.scim.client.ScimTargetClient;
 import com.littleauth.keycloak.scim.config.InvalidTargetUrlException;
 import com.littleauth.keycloak.scim.config.ScimTargetConfig;
 import com.littleauth.keycloak.scim.store.ScimSyncMapping;
+import de.captaingoldfish.scim.sdk.client.ScimClientConfig;
 import de.captaingoldfish.scim.sdk.client.response.ServerResponse;
 import de.captaingoldfish.scim.sdk.common.resources.User;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.keycloak.component.ComponentModel;
 import org.keycloak.models.KeycloakSession;
@@ -182,5 +184,66 @@ class ScimEventListenerProviderTest {
     assertThrows(
         InvalidTargetUrlException.class,
         () -> provider.buildClient(session, config));
+  }
+
+  @Test
+  void buildScimClientConfigThrowsWhenAuthModeIsBasicAndUsernameIsBlank() {
+    // Defense in depth: ScimTargetStorageProviderFactory.validateConfiguration already
+    // rejects this combination at save time, but a config that bypasses or predates that
+    // check must still fail loudly here rather than silently build a broken Basic header
+    // with an empty username -- BasicAuth.getAuthorizationHeaderValue() treats a null
+    // username as an empty string, not an error, so this can't rely on the SDK to catch it.
+    var config = new ScimTargetConfig(basicAuthModelWithoutUsername());
+
+    assertThrows(
+        IllegalStateException.class, () -> provider.buildScimClientConfig(config, "s3cret"));
+  }
+
+  private static ComponentModel basicAuthModelWithoutUsername() {
+    ComponentModel model = new ComponentModel();
+    model.put(ScimTargetConfig.KEY_AUTH_MODE, "BASIC");
+    return model;
+  }
+
+  @Test
+  void buildScimClientConfigSetsBasicAuthWhenAuthModeIsBasic() {
+    ComponentModel model = new ComponentModel();
+    model.put(ScimTargetConfig.KEY_AUTH_MODE, "BASIC");
+    model.put(ScimTargetConfig.KEY_USERNAME, "alice");
+    var config = new ScimTargetConfig(model);
+
+    ScimClientConfig clientConfig = provider.buildScimClientConfig(config, "s3cret");
+
+    assertEquals(
+        "Basic YWxpY2U6czNjcmV0", clientConfig.getBasicAuth().getAuthorizationHeaderValue());
+  }
+
+  @Test
+  void buildScimClientConfigLeavesBasicAuthUnsetForBearerMode() {
+    var config = new ScimTargetConfig(new ComponentModel());
+
+    ScimClientConfig clientConfig = provider.buildScimClientConfig(config, "s3cret");
+
+    assertNull(clientConfig.getBasicAuth());
+  }
+
+  @Test
+  void buildAuthHeadersReturnsBearerHeaderForBearerMode() {
+    var config = new ScimTargetConfig(new ComponentModel());
+
+    assertEquals(
+        Map.of("Authorization", "Bearer s3cret"), provider.buildAuthHeaders(config, "s3cret"));
+  }
+
+  @Test
+  void buildAuthHeadersReturnsEmptyMapForBasicModeSoTheClientLevelBasicAuthFires() {
+    // Passing an explicit Authorization header here would collide with the client-level
+    // BasicAuth set in buildScimClientConfig -- ScimHttpClient only applies its own basic
+    // auth when the outgoing request doesn't already carry an Authorization header.
+    ComponentModel model = new ComponentModel();
+    model.put(ScimTargetConfig.KEY_AUTH_MODE, "BASIC");
+    var config = new ScimTargetConfig(model);
+
+    assertEquals(Map.of(), provider.buildAuthHeaders(config, "s3cret"));
   }
 }
