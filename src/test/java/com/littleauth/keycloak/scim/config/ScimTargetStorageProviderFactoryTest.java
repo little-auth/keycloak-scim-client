@@ -51,5 +51,48 @@ class ScimTargetStorageProviderFactoryTest {
     assertTrue(names.contains(ScimTargetConfig.KEY_CREDENTIAL_VAULT_REF));
     assertTrue(names.contains(ScimTargetConfig.KEY_DELETE_POLICY));
     assertTrue(names.contains(ScimTargetConfig.KEY_SYNC_ENABLED));
+    assertTrue(names.contains(ScimTargetConfig.KEY_AUTH_MODE));
+    assertTrue(names.contains(ScimTargetConfig.KEY_USERNAME));
+  }
+
+  @Test
+  void rejectsBasicAuthModeWithoutUsernameAtSaveTime() {
+    ComponentModel model = new ComponentModel();
+    model.put(ScimTargetConfig.KEY_TARGET_URL, "https://93.184.216.34/scim/v2");
+    model.put(ScimTargetConfig.KEY_AUTH_MODE, "BASIC");
+
+    assertThrows(
+        ComponentValidationException.class,
+        () -> factory.validateConfiguration(session, realm, model));
+  }
+
+  @Test
+  void rejectsBasicAuthModeWithBlankUsernameAtSaveTime() {
+    ComponentModel model = new ComponentModel();
+    model.put(ScimTargetConfig.KEY_TARGET_URL, "https://93.184.216.34/scim/v2");
+    model.put(ScimTargetConfig.KEY_AUTH_MODE, "BASIC");
+    model.put(ScimTargetConfig.KEY_USERNAME, "   ");
+
+    assertThrows(
+        ComponentValidationException.class,
+        () -> factory.validateConfiguration(session, realm, model));
+  }
+
+  @Test
+  void acceptsBasicAuthModeWithUsernameAtSaveTime() {
+    ComponentModel model = new ComponentModel();
+    model.put(ScimTargetConfig.KEY_TARGET_URL, "https://93.184.216.34/scim/v2");
+    model.put(ScimTargetConfig.KEY_AUTH_MODE, "BASIC");
+    model.put(ScimTargetConfig.KEY_USERNAME, "svc-account");
+
+    assertDoesNotThrow(() -> factory.validateConfiguration(session, realm, model));
+  }
+
+  @Test
+  void acceptsDefaultBearerAuthModeWithoutUsername() {
+    ComponentModel model = new ComponentModel();
+    model.put(ScimTargetConfig.KEY_TARGET_URL, "https://93.184.216.34/scim/v2");
+
+    assertDoesNotThrow(() -> factory.validateConfiguration(session, realm, model));
   }
 }

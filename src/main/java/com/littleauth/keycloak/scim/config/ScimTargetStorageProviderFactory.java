@@ -54,11 +54,27 @@ public class ScimTargetStorageProviderFactory
             ProviderConfigProperty.MULTIVALUED_STRING_TYPE,
             null),
         new ProviderConfigProperty(
+            ScimTargetConfig.KEY_AUTH_MODE,
+            "Auth mode",
+            "How outbound SCIM requests authenticate: a Bearer token, or HTTP Basic auth "
+                + "(requires the username field below).",
+            ProviderConfigProperty.LIST_TYPE,
+            ScimTargetConfig.AuthMode.BEARER.name(),
+            ScimTargetConfig.AuthMode.BEARER.name(),
+            ScimTargetConfig.AuthMode.BASIC.name()),
+        new ProviderConfigProperty(
+            ScimTargetConfig.KEY_USERNAME,
+            "Username",
+            "The Basic auth username. Only used when Auth mode is Basic.",
+            ProviderConfigProperty.STRING_TYPE,
+            null),
+        new ProviderConfigProperty(
             ScimTargetConfig.KEY_CREDENTIAL_VAULT_REF,
             "Credential (vault reference)",
             "A Keycloak Vault SPI reference (${vault.ID}), never a raw secret -- see "
                 + "Server Administration Guide \"Using a vault to obtain secrets\". Sent as "
-                + "a Bearer token; Basic auth isn't implemented yet (tracked separately).",
+                + "a Bearer token when Auth mode is Bearer, or as the Basic auth password "
+                + "when Auth mode is Basic.",
             ProviderConfigProperty.STRING_TYPE,
             null,
             true),
@@ -90,6 +106,12 @@ public class ScimTargetStorageProviderFactory
       new TargetUrlValidator(config.getAllowlistHosts()).validate(targetUrl);
     } catch (InvalidTargetUrlException e) {
       throw new ComponentValidationException(e.getMessage(), e);
+    }
+    if (config.getAuthMode() == ScimTargetConfig.AuthMode.BASIC
+        && (config.getUsername() == null || config.getUsername().isBlank())) {
+      throw new ComponentValidationException(
+          "Auth mode is Basic but no username is configured -- Basic auth requires both a "
+              + "username and a vault-backed password.");
     }
   }
 
