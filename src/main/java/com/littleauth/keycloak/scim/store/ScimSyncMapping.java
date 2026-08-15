@@ -32,8 +32,17 @@ public class ScimSyncMapping {
   // AuthMode's HTTP auth scheme name must be added here in the same change that adds the
   // mode -- an unredacted scheme leaks a trivially-reversible credential into the DB and
   // logs the moment a target echoes the Authorization header back in an error body.
+  //
+  // The token class is bounded to common JSON/text delimiters, not just whitespace:
+  // "Bearer"/"Basic" also name the (non-secret) WWW-Authenticate challenge scheme, and a
+  // target's 401 body commonly echoes one back as unspaced JSON -- an unbounded match
+  // would consume everything to the end of such a body once nothing else in it contains
+  // whitespace, destroying the status/traceId an operator needs to diagnose the failure.
+  // Deliberately has no minimum length: a length floor would under-redact a short-but-real
+  // credential, which is a strictly worse failure than the residual over-redaction of a
+  // short non-secret challenge parameter.
   private static final Pattern CREDENTIAL_HEADER =
-      Pattern.compile("(?i)(Bearer|Basic)\\s+\\S+");
+      Pattern.compile("(?i)(Bearer|Basic)\\s+[^\\s\",;}\\]]+");
 
   @Id
   @Column(name = "ID", length = 36)

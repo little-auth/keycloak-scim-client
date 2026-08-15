@@ -41,6 +41,36 @@ class ScimSyncMappingTest {
   }
 
   @Test
+  void redactsVeryShortBasicCredentialWithoutLengthFloor() {
+    // The redaction pattern must never rely on a minimum-length threshold to decide
+    // what counts as a credential -- that would under-redact a short-but-real one, which
+    // is a strictly worse failure than the over-redaction this class already accepts.
+    var mapping = new ScimSyncMapping();
+    mapping.setLastSyncError("Authorization: Basic YTpi rejected");
+
+    String stored = mapping.getLastSyncError();
+    assertFalse(stored.contains("YTpi"), "even a very short credential must be redacted");
+  }
+
+  @Test
+  void doesNotDestroyDiagnosticInfoFollowingChallengeHeaderValue() {
+    // "Basic"/"Bearer" also name the (non-secret) WWW-Authenticate challenge scheme, not
+    // just a sent credential -- a target's 401 error body commonly echoes one back, often
+    // as unspaced JSON. The prior unbounded match (\S+) would consume everything to the
+    // end of such a body once nothing else in it contained whitespace, destroying the
+    // status/traceId an operator actually needs to diagnose the failure. Bounding the
+    // match to stop at JSON/text delimiters keeps that diagnostic content intact.
+    var mapping = new ScimSyncMapping();
+    mapping.setLastSyncError(
+        "{\"status\":\"401\",\"challenge\":\"Basic realm=\\\"scim-prod\\\"\","
+            + "\"traceId\":\"abc123\"}");
+
+    String stored = mapping.getLastSyncError();
+    assertTrue(stored.contains("\"traceId\":\"abc123\"}"), "diagnostic info after the "
+        + "challenge value must survive: " + stored);
+  }
+
+  @Test
   void leavesErrorMessagesWithoutCredentialsUnchanged() {
     var mapping = new ScimSyncMapping();
     mapping.setLastSyncError("PATCH failed: 400 Bad Request");
