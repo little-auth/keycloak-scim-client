@@ -63,9 +63,36 @@ public class DefaultReconciliationSchedulerProviderFactory
         session -> {
           TimerProvider timer = session.getProvider(TimerProvider.class);
           if (timer != null) {
-            timer.schedule(() -> ReconciliationTick.run(factory, executorService), TICK_INTERVAL_MS, TIMER_TASK_NAME);
+            timer.schedule(() -> runTickIsolated(factory), TICK_INTERVAL_MS, TIMER_TASK_NAME);
           }
         });
+  }
+
+  /**
+   * Confirmed via bytecode inspection of {@code BasicTimerProviderFactory} (the SPI's only
+   * implementation): Keycloak's shared {@code java.util.Timer} wraps a scheduled task's
+   * {@code run()} with no exception handling at all. Per {@code java.util.Timer}'s own
+   * contract, an uncaught exception here doesn't just fail this tick -- it terminates the
+   * *entire* timer, silently cancelling every other task scheduled on it server-wide
+   * (session cleanup, admin-event cleanup, any other plugin's periodic work), with no
+   * recovery short of a restart. {@link ReconciliationTick#run}'s own per-realm
+   * {@code catch} runs on the executor's worker threads, not this one -- it does not cover
+   * the transaction lookup or the {@code executor.submit} calls that happen directly on the
+   * timer thread inside {@code run} itself. This is the actual, only correct place to stop
+   * that propagation, mirroring Keycloak's own {@code ScheduledTaskRunner} (also on this
+   * project's classpath), which catches {@code Throwable} at exactly this boundary.
+   */
+  private void runTickIsolated(KeycloakSessionFactory factory) {
+    try {
+      ReconciliationTick.run(factory, executorService);
+    } catch (Throwable t) {
+      LOGGER.log(
+          Level.SEVERE,
+          "SCIM reconciliation: tick threw on Keycloak's shared timer thread -- this must "
+              + "never propagate, or it silently cancels every other task scheduled on this "
+              + "server",
+          t);
+    }
   }
 
   @Override
