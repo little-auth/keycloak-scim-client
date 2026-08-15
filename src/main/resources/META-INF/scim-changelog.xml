@@ -33,4 +33,30 @@
     </createIndex>
   </changeSet>
 
+  <changeSet id="scim-reconciliation-checkpoint-1" author="keycloak-scim-client">
+    <createTable tableName="SCIM_RECONCILIATION_CHECKPOINT">
+      <column name="ID" type="VARCHAR(36)">
+        <constraints primaryKey="true" nullable="false"/>
+      </column>
+      <column name="REALM_ID" type="VARCHAR(36)">
+        <constraints nullable="false"/>
+      </column>
+      <column name="RESOURCE_TYPE" type="VARCHAR(16)">
+        <constraints nullable="false"/>
+      </column>
+      <column name="NEXT_OFFSET" type="INT" defaultValueNumeric="0">
+        <constraints nullable="false"/>
+      </column>
+      <column name="PASS_STARTED_TIME" type="BIGINT"/>
+      <column name="LAST_COMPLETED_TIME" type="BIGINT"/>
+      <column name="PAGES_SINCE_PASS_START" type="BIGINT" defaultValueNumeric="0">
+        <constraints nullable="false"/>
+      </column>
+    </createTable>
+    <addUniqueConstraint
+        tableName="SCIM_RECONCILIATION_CHECKPOINT"
+        columnNames="REALM_ID, RESOURCE_TYPE"
+        constraintName="UK_SCIM_RECONCILIATION_CHECKPOINT"/>
+  </changeSet>
+
 </databaseChangeLog>
