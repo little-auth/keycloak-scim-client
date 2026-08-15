@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -127,6 +128,23 @@ class ScimTargetConfigTest {
   void getDeletePolicyDefaultsToSoftDeleteWhenExplicitlySetToAnEmptyList() {
     ComponentModel model = new ComponentModel();
     model.getConfig().put(ScimTargetConfig.KEY_DELETE_POLICY, List.of());
+    var config = new ScimTargetConfig(model);
+    assertEquals(ScimTargetConfig.DeletePolicy.SOFT_DELETE, config.getDeletePolicy());
+  }
+
+  /**
+   * Unlike the multi-value case, a single stored value that is itself null must not throw
+   * -- it must default the same as an absent key. model.getConfig().get(KEY) can hand back
+   * a singleton list containing null (a NULL config row read back from the database, with
+   * no upstream null-filtering guaranteed at that layer), and Enum.valueOf(null) throws
+   * NullPointerException, not IllegalArgumentException -- a bare "get the first value"
+   * read handled this safely before the cardinality check was added; the cardinality check
+   * must not reopen it.
+   */
+  @Test
+  void getDeletePolicyDefaultsToSoftDeleteWhenTheSingleStoredValueIsNull() {
+    ComponentModel model = new ComponentModel();
+    model.getConfig().put(ScimTargetConfig.KEY_DELETE_POLICY, Arrays.asList((String) null));
     var config = new ScimTargetConfig(model);
     assertEquals(ScimTargetConfig.DeletePolicy.SOFT_DELETE, config.getDeletePolicy());
   }

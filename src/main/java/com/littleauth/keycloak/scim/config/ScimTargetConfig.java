@@ -67,7 +67,12 @@ public class ScimTargetConfig {
           "Multiple values submitted for " + KEY_DELETE_POLICY + " " + values
               + " -- exactly one is required.");
     }
-    return DeletePolicy.valueOf(values.get(0));
+    // The single stored value can itself be null (e.g. a NULL config row read back from
+    // the database) -- Enum.valueOf(null) throws NullPointerException, not
+    // IllegalArgumentException, which the cardinality check above doesn't guard against
+    // and validateConfiguration's catch(IllegalArgumentException) wouldn't catch either.
+    String raw = values.get(0);
+    return raw == null ? DeletePolicy.SOFT_DELETE : DeletePolicy.valueOf(raw);
   }
 
   public boolean isSyncEnabled() {
