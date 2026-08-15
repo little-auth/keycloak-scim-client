@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -51,5 +52,51 @@ class ScimTargetStorageProviderFactoryTest {
     assertTrue(names.contains(ScimTargetConfig.KEY_CREDENTIAL_VAULT_REF));
     assertTrue(names.contains(ScimTargetConfig.KEY_DELETE_POLICY));
     assertTrue(names.contains(ScimTargetConfig.KEY_SYNC_ENABLED));
+    assertTrue(names.contains(ScimTargetConfig.KEY_HARD_DELETE_CONFIRMATION));
+  }
+
+  /**
+   * Pre-mortem mitigation (#7): HARD_DELETE must not be enableable via a bare toggle --
+   * saving it requires a matching, realm-specific confirmation phrase, enforced here so no
+   * save path (Admin Console UI or Admin REST API) can bypass it.
+   */
+  @Test
+  void rejectsHardDeletePolicyWithoutConfirmationPhrase() {
+    when(realm.getName()).thenReturn("acme");
+    ComponentModel model = new ComponentModel();
+    model.put(ScimTargetConfig.KEY_DELETE_POLICY, "HARD_DELETE");
+
+    assertThrows(
+        ComponentValidationException.class,
+        () -> factory.validateConfiguration(session, realm, model));
+  }
+
+  @Test
+  void rejectsHardDeletePolicyWithWrongConfirmationPhrase() {
+    when(realm.getName()).thenReturn("acme");
+    ComponentModel model = new ComponentModel();
+    model.put(ScimTargetConfig.KEY_DELETE_POLICY, "HARD_DELETE");
+    model.put(ScimTargetConfig.KEY_HARD_DELETE_CONFIRMATION, "ENABLE HARD DELETE");
+
+    assertThrows(
+        ComponentValidationException.class,
+        () -> factory.validateConfiguration(session, realm, model));
+  }
+
+  @Test
+  void acceptsHardDeletePolicyWithExactRealmSpecificConfirmationPhrase() {
+    when(realm.getName()).thenReturn("acme");
+    ComponentModel model = new ComponentModel();
+    model.put(ScimTargetConfig.KEY_DELETE_POLICY, "HARD_DELETE");
+    model.put(ScimTargetConfig.KEY_HARD_DELETE_CONFIRMATION, "ENABLE HARD DELETE FOR ACME");
+
+    assertDoesNotThrow(() -> factory.validateConfiguration(session, realm, model));
+  }
+
+  @Test
+  void softDeletePolicyDoesNotRequireConfirmation() {
+    // DeletePolicy defaults to SOFT_DELETE when unset -- confirmation must never be required.
+    assertDoesNotThrow(
+        () -> factory.validateConfiguration(session, realm, new ComponentModel()));
   }
 }

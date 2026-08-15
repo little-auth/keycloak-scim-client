@@ -1,8 +1,10 @@
 package com.littleauth.keycloak.scim.config;
 
 import java.util.List;
+import java.util.Locale;
 import org.keycloak.component.ComponentModel;
 import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.RealmModel;
 import org.keycloak.vault.VaultStringSecret;
 
 /**
@@ -22,6 +24,7 @@ public class ScimTargetConfig {
   public static final String KEY_CREDENTIAL_VAULT_REF = "credentialVaultRef";
   public static final String KEY_DELETE_POLICY = "deletePolicy";
   public static final String KEY_SYNC_ENABLED = "syncEnabled";
+  public static final String KEY_HARD_DELETE_CONFIRMATION = "hardDeleteConfirmation";
 
   private final ComponentModel model;
 
@@ -75,6 +78,28 @@ public class ScimTargetConfig {
                   new IllegalStateException(
                       "SCIM target credential vault reference did not resolve to a value"));
     }
+  }
+
+  /**
+   * The exact phrase an admin must type into {@link #KEY_HARD_DELETE_CONFIRMATION} to enable
+   * {@link DeletePolicy#HARD_DELETE} for the given realm. Embeds the realm's own name so a
+   * single copy-pasted literal can't silently re-enable hard-delete across every realm in an
+   * IaC-managed config -- a global fixed phrase alone doesn't hold up against that (pre-mortem
+   * mitigation, see the implementation ticket).
+   */
+  public static String requiredHardDeleteConfirmationPhrase(RealmModel realm) {
+    return "ENABLE HARD DELETE FOR " + realm.getName().toUpperCase(Locale.ROOT);
+  }
+
+  /**
+   * Whether {@link #KEY_HARD_DELETE_CONFIRMATION} matches the realm-specific phrase required
+   * to enable {@link DeletePolicy#HARD_DELETE} -- the high-friction confirmation gate this
+   * exists for is a bare toggle otherwise. Only whitespace around the value is forgiven; the
+   * phrase itself stays exact-match (case included) by design.
+   */
+  public boolean isHardDeleteConfirmed(RealmModel realm) {
+    String raw = model.get(KEY_HARD_DELETE_CONFIRMATION);
+    return raw != null && requiredHardDeleteConfirmationPhrase(realm).equals(raw.trim());
   }
 
   /** How a Keycloak user delete maps to the SCIM target. */

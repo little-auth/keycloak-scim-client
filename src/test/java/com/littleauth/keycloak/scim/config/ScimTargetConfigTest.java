@@ -12,6 +12,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.keycloak.component.ComponentModel;
 import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.RealmModel;
 import org.keycloak.vault.VaultStringSecret;
 import org.keycloak.vault.VaultTranscriber;
 
@@ -115,5 +116,49 @@ class ScimTargetConfigTest {
     model.put(ScimTargetConfig.KEY_SYNC_ENABLED, true);
     var config = new ScimTargetConfig(model);
     assertTrue(config.isSyncEnabled());
+  }
+
+  private static RealmModel realmNamed(String name) {
+    RealmModel realm = mock(RealmModel.class);
+    when(realm.getName()).thenReturn(name);
+    return realm;
+  }
+
+  @Test
+  void isHardDeleteConfirmedReturnsFalseWhenConfirmationUnset() {
+    var config = new ScimTargetConfig(new ComponentModel());
+    assertFalse(config.isHardDeleteConfirmed(realmNamed("acme")));
+  }
+
+  @Test
+  void isHardDeleteConfirmedReturnsFalseWhenConfirmationDoesNotMatchRealmSpecificPhrase() {
+    ComponentModel model = new ComponentModel();
+    model.put(ScimTargetConfig.KEY_HARD_DELETE_CONFIRMATION, "ENABLE HARD DELETE FOR OTHER-REALM");
+    var config = new ScimTargetConfig(model);
+    assertFalse(config.isHardDeleteConfirmed(realmNamed("acme")));
+  }
+
+  @Test
+  void isHardDeleteConfirmedReturnsTrueWhenConfirmationMatchesExactRealmSpecificPhrase() {
+    ComponentModel model = new ComponentModel();
+    model.put(ScimTargetConfig.KEY_HARD_DELETE_CONFIRMATION, "ENABLE HARD DELETE FOR ACME");
+    var config = new ScimTargetConfig(model);
+    assertTrue(config.isHardDeleteConfirmed(realmNamed("acme")));
+  }
+
+  @Test
+  void isHardDeleteConfirmedTrimsSurroundingWhitespaceButStaysCaseSensitive() {
+    ComponentModel model = new ComponentModel();
+    model.put(ScimTargetConfig.KEY_HARD_DELETE_CONFIRMATION, "  ENABLE HARD DELETE FOR ACME  ");
+    var config = new ScimTargetConfig(model);
+    assertTrue(config.isHardDeleteConfirmed(realmNamed("acme")));
+  }
+
+  @Test
+  void isHardDeleteConfirmedRejectsWrongCaseOrWrongRealmName() {
+    ComponentModel model = new ComponentModel();
+    model.put(ScimTargetConfig.KEY_HARD_DELETE_CONFIRMATION, "enable hard delete for acme-realm");
+    var config = new ScimTargetConfig(model);
+    assertFalse(config.isHardDeleteConfirmed(realmNamed("Acme-Realm")));
   }
 }

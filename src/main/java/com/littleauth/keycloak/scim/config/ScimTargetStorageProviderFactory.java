@@ -13,7 +13,11 @@ import org.keycloak.storage.UserStorageProviderFactory;
  * Factory for {@link ScimTargetStorageProvider} -- the vehicle for {@link ScimTargetConfig}'s
  * admin console form (Keycloak's generic "Provider Config" UI, pre-declarative-ui fallback;
  * see the UI mechanism decision in context.md). {@link #validateConfiguration} wires in
- * {@link TargetUrlValidator}'s SSRF guard at config-save time -- AC-5.
+ * {@link TargetUrlValidator}'s SSRF guard at config-save time -- AC-5 -- and also enforces
+ * that {@link ScimTargetConfig.DeletePolicy#HARD_DELETE} can't be enabled by the delete-policy
+ * dropdown alone: it requires a matching, realm-specific confirmation phrase (issue #7's
+ * pre-mortem mitigation), rejected identically whether the save came from the Admin Console
+ * UI or the Admin REST API.
  */
 public class ScimTargetStorageProviderFactory
     implements UserStorageProviderFactory<ScimTargetStorageProvider> {
@@ -65,11 +69,23 @@ public class ScimTargetStorageProviderFactory
         new ProviderConfigProperty(
             ScimTargetConfig.KEY_DELETE_POLICY,
             "Delete policy",
-            "How a Keycloak user delete maps to the SCIM target.",
+            "How a Keycloak user delete maps to the SCIM target. Selecting HARD_DELETE also "
+                + "requires filling in the \"Hard-delete confirmation\" field below -- it "
+                + "cannot be enabled by this dropdown alone.",
             ProviderConfigProperty.LIST_TYPE,
             ScimTargetConfig.DeletePolicy.SOFT_DELETE.name(),
             ScimTargetConfig.DeletePolicy.SOFT_DELETE.name(),
             ScimTargetConfig.DeletePolicy.HARD_DELETE.name()),
+        new ProviderConfigProperty(
+            ScimTargetConfig.KEY_HARD_DELETE_CONFIRMATION,
+            "Hard-delete confirmation",
+            "Required only when Delete policy above is HARD_DELETE. Hard-delete permanently "
+                + "removes the user's SCIM resource on every Keycloak user delete -- this "
+                + "cannot be undone. To enable it, type the exact phrase \"ENABLE HARD DELETE "
+                + "FOR <REALM NAME>\", replacing <REALM NAME> with this realm's own name in "
+                + "upper case (e.g. realm \"acme\" -> \"ENABLE HARD DELETE FOR ACME\").",
+            ProviderConfigProperty.STRING_TYPE,
+            null),
         new ProviderConfigProperty(
             ScimTargetConfig.KEY_SYNC_ENABLED,
             "Sync enabled",
@@ -82,6 +98,15 @@ public class ScimTargetStorageProviderFactory
   public void validateConfiguration(KeycloakSession session, RealmModel realm, ComponentModel model)
       throws ComponentValidationException {
     var config = new ScimTargetConfig(model);
+    if (config.getDeletePolicy() == ScimTargetConfig.DeletePolicy.HARD_DELETE
+        && !config.isHardDeleteConfirmed(realm)) {
+      throw new ComponentValidationException(
+          "Hard-delete mode permanently removes the user's SCIM resource on every Keycloak "
+              + "user delete and cannot be undone -- to enable it, set \"Hard-delete "
+              + "confirmation\" to the exact phrase: \""
+              + ScimTargetConfig.requiredHardDeleteConfirmationPhrase(realm)
+              + "\".");
+    }
     String targetUrl = config.getTargetUrl();
     if (targetUrl == null || targetUrl.isBlank()) {
       return; // Allow saving an unconfigured/disabled instance.
