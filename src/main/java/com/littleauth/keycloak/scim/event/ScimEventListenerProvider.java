@@ -1,17 +1,14 @@
 package com.littleauth.keycloak.scim.event;
 
 import com.littleauth.keycloak.scim.client.ScimTargetClient;
+import com.littleauth.keycloak.scim.client.ScimTargetClientFactory;
 import com.littleauth.keycloak.scim.config.ScimTargetConfig;
-import com.littleauth.keycloak.scim.config.ScimTargetStorageProviderFactory;
-import com.littleauth.keycloak.scim.config.TargetUrlValidator;
+import com.littleauth.keycloak.scim.config.ScimTargetConfigLookup;
 import com.littleauth.keycloak.scim.store.ScimSyncMapping;
 import com.littleauth.keycloak.scim.store.ScimSyncMappingDao;
-import de.captaingoldfish.scim.sdk.client.ScimClientConfig;
-import de.captaingoldfish.scim.sdk.client.ScimRequestBuilder;
 import de.captaingoldfish.scim.sdk.client.response.ServerResponse;
 import de.captaingoldfish.scim.sdk.common.resources.User;
 import jakarta.persistence.EntityManager;
-import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.logging.Level;
@@ -24,7 +21,6 @@ import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionFactory;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.utils.KeycloakModelUtils;
-import org.keycloak.storage.UserStorageProvider;
 
 /**
  * Turns interpreted admin events into outbound SCIM calls. {@link #onEvent(AdminEvent,
@@ -204,36 +200,14 @@ public class ScimEventListenerProvider implements EventListenerProvider {
   }
 
   private Optional<ScimTargetConfig> loadConfig(RealmModel realm) {
-    // realm.getComponentsStream(providerType) (the filtered overload) does not reliably
-    // return components created via the Admin REST API in this Keycloak version/storage
-    // mode -- confirmed via the conformance harness against a real instance: the
-    // unfiltered stream includes our component with an exactly-matching providerType,
-    // the filtered overload returns none. Filtering the unfiltered stream ourselves
-    // sidesteps whatever that overload's bug is.
-    return realm
-        .getComponentsStream()
-        .filter(c -> UserStorageProvider.class.getName().equals(c.getProviderType()))
-        .filter(c -> ScimTargetStorageProviderFactory.ID.equals(c.getProviderId()))
-        .findFirst()
-        .map(ScimTargetConfig::new);
+    return ScimTargetConfigLookup.forRealm(realm);
   }
 
   ScimTargetClient buildClient(KeycloakSession session, ScimTargetConfig config) {
-    // Re-validated here, not just at config-save time (ScimTargetStorageProviderFactory
-    // .validateConfiguration): a save-time-only check is a DNS-rebinding TOCTOU gap -- an
-    // admin-configured hostname that resolved to a public address at save time can be
-    // repointed at an internal address before the next sync fires. This runs on every
-    // dispatch (not cached) so a rebind is caught before the next outbound call, not just
-    // the first one.
-    new TargetUrlValidator(config.getAllowlistHosts()).validate(config.getTargetUrl());
-    String credential = config.resolveCredential(session);
-    ScimClientConfig clientConfig =
-        ScimClientConfig.builder().connectTimeout(5).requestTimeout(10).socketTimeout(10).build();
-    var requestBuilder = new ScimRequestBuilder(config.getTargetUrl(), clientConfig);
-    // Passed per-request via ScimTargetClient, not through ScimClientConfig -- see that
-    // class's doc for why client-level header config proved unreliable in this SDK version.
-    Map<String, String> authHeaders = Map.of("Authorization", "Bearer " + credential);
-    return new ScimTargetClient(requestBuilder, authHeaders);
+    // Delegates to ScimTargetClientFactory, now shared with ReconciliationJob (issue #6) --
+    // see that class's doc for the DNS-rebinding TOCTOU note on why this re-validates on
+    // every call rather than caching.
+    return ScimTargetClientFactory.build(session, config);
   }
 
   @Override
