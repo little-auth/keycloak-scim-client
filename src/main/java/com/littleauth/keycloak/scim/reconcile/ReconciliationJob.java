@@ -75,8 +75,22 @@ public final class ReconciliationJob {
     if (!page.isEmpty()) {
       try (ScimTargetClient client = ScimTargetClientFactory.build(session, config)) {
         for (UserModel kcUser : page) {
-          UserRepresentation kcRep = ModelToRepresentation.toRepresentation(session, realm, kcUser);
-          UserOutcome outcome = reconcileUser(client, mappingDao, realm.getId(), kcUser.getId(), kcRep);
+          // A malformed representation must not block every other user in this page or
+          // roll back the whole page's progress -- see reconcileUserSafely's doc for why
+          // an uncaught exception inside the loop itself would be worse.
+          UserOutcome outcome;
+          try {
+            UserRepresentation kcRep = ModelToRepresentation.toRepresentation(session, realm, kcUser);
+            outcome = reconcileUserSafely(client, mappingDao, realm.getId(), kcUser.getId(), kcRep);
+          } catch (RuntimeException e) {
+            LOGGER.log(
+                Level.WARNING,
+                "SCIM reconciliation: user "
+                    + kcUser.getId()
+                    + " threw building its representation, skipping",
+                e);
+            outcome = UserOutcome.FAILED;
+          }
           switch (outcome) {
             case CREATED -> created++;
             case UPDATED -> updated++;
@@ -133,6 +147,31 @@ public final class ReconciliationJob {
     IN_SYNC,
     CONFLICT,
     FAILED
+  }
+
+  /**
+   * Wraps {@link #reconcileUser} so one user's uncaught exception (an SDK-level throw that
+   * isn't expressed as a {@code ServerResponse} failure, a null-pointer on an unexpected
+   * shape, ...) never propagates out of the page loop. Left uncaught, it would roll back
+   * the whole page's transaction -- including the checkpoint advance -- turning a single
+   * bad record into a permanent stall, since the next tick would retry the exact same
+   * offset forever rather than moving past it.
+   */
+  static UserOutcome reconcileUserSafely(
+      ScimTargetClient client,
+      ScimSyncMappingDao mappingDao,
+      String realmId,
+      String keycloakUserId,
+      UserRepresentation kcRep) {
+    try {
+      return reconcileUser(client, mappingDao, realmId, keycloakUserId, kcRep);
+    } catch (RuntimeException e) {
+      LOGGER.log(
+          Level.WARNING,
+          "SCIM reconciliation: user " + keycloakUserId + " threw while reconciling, skipping",
+          e);
+      return UserOutcome.FAILED;
+    }
   }
 
   static UserOutcome reconcileUser(

@@ -178,6 +178,25 @@ class ReconciliationJobTest {
     assertEquals(160, resumed.getNextOffset());
   }
 
+  // ---- reconcileUserSafely: one user's throw must not escape the page loop ----
+
+  @Test
+  void reconcileUserSafelyReturnsFailedInsteadOfPropagatingWhenReconcileUserThrows() {
+    // An uncaught exception here would roll back the whole page's transaction -- including
+    // the checkpoint advance -- turning one bad record into a permanent stall (the next
+    // tick would retry the exact same offset forever). See ReconciliationJob's doc.
+    ScimTargetClient client = mock(ScimTargetClient.class);
+    when(client.findByExternalId("kc-9")).thenThrow(new IllegalStateException("SDK exploded"));
+
+    entityManager.getTransaction().begin();
+    ReconciliationJob.UserOutcome outcome =
+        ReconciliationJob.reconcileUserSafely(
+            client, mappingDao, "realm-c", "kc-9", representation("kjensen", true));
+    entityManager.getTransaction().commit();
+
+    assertEquals(ReconciliationJob.UserOutcome.FAILED, outcome);
+  }
+
   // ---- reconcileUser / selfHealCreate / reconcileExisting ----
 
   @Test
