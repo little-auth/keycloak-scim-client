@@ -277,14 +277,25 @@ class ScimTargetClientTest {
   }
 
   @Test
-  void replaceIfVersionUnchangedAppliesWithIfMatchWhenAnExpectedVersionIsPresent() {
+  void replaceIfVersionUnchangedRechecksAndAppliesWithIfMatchWhenVersionUnchanged() {
+    // Client-side recheck happens even when an ETag is present -- not relying solely on
+    // the target enforcing If-Match server-side, since RFC 7644 only SHOULDs that
+    // enforcement rather than requiring it.
     ScimRequestBuilder requestBuilder = mock(ScimRequestBuilder.class);
+    ETag version = ETag.parseETag("\"v1\"");
+    Meta expectedMeta = Meta.builder().version(version).build();
+
+    User rechecked = new User();
+    Meta recheckedMeta = Meta.builder().version(version).build();
+    rechecked.setMeta(recheckedMeta);
+    ServerResponse<User> recheckResponse = successResponse();
+    when(recheckResponse.getResource()).thenReturn(rechecked);
+    GetBuilder<User> getBuilder = mockGetBuilder(requestBuilder, "scim-123");
+    when(getBuilder.sendRequest(any())).thenReturn(recheckResponse);
+
     UpdateBuilder<User> updateBuilder = mockUpdateBuilder(requestBuilder, "scim-123");
     ServerResponse<User> putSuccess = successResponse();
     when(updateBuilder.sendRequest(any())).thenReturn(putSuccess);
-
-    ETag version = ETag.parseETag("\"v1\"");
-    Meta expectedMeta = Meta.builder().version(version).build();
 
     var client = new ScimTargetClient(requestBuilder, new PatchCapability(true), Map.of());
     User desired = new User();
@@ -294,6 +305,29 @@ class ScimTargetClientTest {
     assertEquals(ReconciliationWriteResult.Outcome.APPLIED, result.outcome());
     assertEquals(putSuccess, result.response());
     verify(updateBuilder).setETagForIfMatch(version);
+  }
+
+  @Test
+  void replaceIfVersionUnchangedReportsConflictWhenTheEtagRecheckDetectsAChange() {
+    // Closes the asymmetry a target that advertises an ETag but doesn't actually enforce
+    // If-Match would otherwise have: without this client-side recheck, such a target got
+    // zero effective protection despite reconciliation believing it was checked.
+    ScimRequestBuilder requestBuilder = mock(ScimRequestBuilder.class);
+    Meta expectedMeta = Meta.builder().version(ETag.parseETag("\"v1\"")).build();
+
+    User rechecked = new User();
+    rechecked.setMeta(Meta.builder().version(ETag.parseETag("\"v2\"")).build());
+    ServerResponse<User> recheckResponse = successResponse();
+    when(recheckResponse.getResource()).thenReturn(rechecked);
+    GetBuilder<User> getBuilder = mockGetBuilder(requestBuilder, "scim-123");
+    when(getBuilder.sendRequest(any())).thenReturn(recheckResponse);
+
+    var client = new ScimTargetClient(requestBuilder, new PatchCapability(true), Map.of());
+    ReconciliationWriteResult result =
+        client.replaceIfVersionUnchanged("scim-123", new User(), expectedMeta);
+
+    assertEquals(ReconciliationWriteResult.Outcome.VERSION_CONFLICT, result.outcome());
+    verify(requestBuilder, never()).update(any(), any(), any());
   }
 
   @Test
