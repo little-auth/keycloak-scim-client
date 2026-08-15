@@ -206,6 +206,21 @@ class ScimEventListenerProviderTest {
   }
 
   @Test
+  void buildScimClientConfigThrowsWhenUsernameContainsColon() {
+    // RFC 7617 SS2: the userid must not contain a colon. A username like "alice:bob"
+    // would base64-encode as "alice:bob:s3cret" -- a server splitting on the first colon
+    // (the spec-correct behavior) reads that as user "alice", password "bob:s3cret",
+    // silently sending the wrong credential instead of failing loudly.
+    ComponentModel model = new ComponentModel();
+    model.put(ScimTargetConfig.KEY_AUTH_MODE, "BASIC");
+    model.put(ScimTargetConfig.KEY_USERNAME, "alice:bob");
+    var config = new ScimTargetConfig(model);
+
+    assertThrows(
+        IllegalStateException.class, () -> provider.buildScimClientConfig(config, "s3cret"));
+  }
+
+  @Test
   void buildScimClientConfigSetsBasicAuthWhenAuthModeIsBasic() {
     ComponentModel model = new ComponentModel();
     model.put(ScimTargetConfig.KEY_AUTH_MODE, "BASIC");

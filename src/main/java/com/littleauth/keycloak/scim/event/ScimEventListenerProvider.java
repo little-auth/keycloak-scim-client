@@ -242,12 +242,17 @@ public class ScimEventListenerProvider implements EventListenerProvider {
    * {@code Authorization} header, which is exactly what {@link #buildAuthHeaders} leaves
    * true for Basic mode.
    *
-   * <p>Rejects a blank username here rather than trusting config-save-time validation
-   * ({@code ScimTargetStorageProviderFactory.validateConfiguration}) alone: {@code
-   * BasicAuth.getAuthorizationHeaderValue()} treats a {@code null} username as an empty
-   * string, not an error, so an unvalidated config would otherwise silently build a
-   * working-looking but wrong header instead of failing loudly -- the same class of
-   * silent 401 this auth mode existed to fix in the first place.
+   * <p>Rejects a blank or colon-containing username here rather than trusting
+   * config-save-time validation ({@code ScimTargetStorageProviderFactory
+   * .validateConfiguration}) alone: {@code BasicAuth.getAuthorizationHeaderValue()}
+   * treats a {@code null} username as an empty string, not an error, and happily builds a
+   * header from a colon-containing one, so an unvalidated config would otherwise silently
+   * build a working-looking but wrong header instead of failing loudly -- the same class
+   * of silent 401 this auth mode existed to fix in the first place. RFC 7617 SS2 forbids a
+   * colon in the userid precisely because it makes the encoded credential ambiguous: a
+   * server splitting {@code username:password} on the first colon would read {@code
+   * "alice:bob"} + password {@code "s3cret"} as user {@code alice}, password {@code
+   * "bob:s3cret"}.
    */
   ScimClientConfig buildScimClientConfig(ScimTargetConfig config, String credential) {
     var builder =
@@ -257,6 +262,10 @@ public class ScimEventListenerProvider implements EventListenerProvider {
       if (username == null || username.isBlank()) {
         throw new IllegalStateException(
             "Auth mode is Basic but no username is configured for this SCIM target");
+      }
+      if (username.indexOf(':') >= 0) {
+        throw new IllegalStateException(
+            "Basic auth username must not contain a colon (RFC 7617)");
       }
       builder.basic(username, credential);
     }

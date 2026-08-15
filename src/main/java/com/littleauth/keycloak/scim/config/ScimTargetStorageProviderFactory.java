@@ -65,7 +65,8 @@ public class ScimTargetStorageProviderFactory
         new ProviderConfigProperty(
             ScimTargetConfig.KEY_USERNAME,
             "Username",
-            "The Basic auth username. Only used when Auth mode is Basic.",
+            "The Basic auth username. Only used when Auth mode is Basic; must not contain "
+                + "a colon (RFC 7617).",
             ProviderConfigProperty.STRING_TYPE,
             null),
         new ProviderConfigProperty(
@@ -107,11 +108,19 @@ public class ScimTargetStorageProviderFactory
     } catch (InvalidTargetUrlException e) {
       throw new ComponentValidationException(e.getMessage(), e);
     }
-    if (config.getAuthMode() == ScimTargetConfig.AuthMode.BASIC
-        && (config.getUsername() == null || config.getUsername().isBlank())) {
-      throw new ComponentValidationException(
-          "Auth mode is Basic but no username is configured -- Basic auth requires both a "
-              + "username and a vault-backed password.");
+    if (config.getAuthMode() == ScimTargetConfig.AuthMode.BASIC) {
+      String username = config.getUsername();
+      if (username == null || username.isBlank()) {
+        throw new ComponentValidationException(
+            "Auth mode is Basic but no username is configured -- Basic auth requires both "
+                + "a username and a vault-backed password.");
+      }
+      if (username.indexOf(':') >= 0) {
+        // RFC 7617 SS2: a colon in the userid makes the base64-encoded credential
+        // ambiguous to decode -- see ScimEventListenerProvider.buildScimClientConfig's doc.
+        throw new ComponentValidationException(
+            "Basic auth username must not contain a colon (RFC 7617)");
+      }
     }
   }
 

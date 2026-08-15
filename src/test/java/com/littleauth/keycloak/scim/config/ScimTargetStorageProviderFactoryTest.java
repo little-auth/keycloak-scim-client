@@ -79,6 +79,20 @@ class ScimTargetStorageProviderFactoryTest {
   }
 
   @Test
+  void rejectsBasicAuthModeWhenUsernameContainsColon() {
+    // RFC 7617 SS2: a colon in the userid makes the resulting Basic auth header
+    // ambiguous to decode (see ScimEventListenerProvider.buildScimClientConfig's doc).
+    ComponentModel model = new ComponentModel();
+    model.put(ScimTargetConfig.KEY_TARGET_URL, "https://93.184.216.34/scim/v2");
+    model.put(ScimTargetConfig.KEY_AUTH_MODE, "BASIC");
+    model.put(ScimTargetConfig.KEY_USERNAME, "alice:bob");
+
+    assertThrows(
+        ComponentValidationException.class,
+        () -> factory.validateConfiguration(session, realm, model));
+  }
+
+  @Test
   void acceptsBasicAuthModeWithUsernameAtSaveTime() {
     ComponentModel model = new ComponentModel();
     model.put(ScimTargetConfig.KEY_TARGET_URL, "https://93.184.216.34/scim/v2");
