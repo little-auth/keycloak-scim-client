@@ -75,7 +75,15 @@ public class ScimTargetStorageProviderFactory
             "Sync enabled",
             "Live kill switch: takes effect on the next event, no restart needed.",
             ProviderConfigProperty.BOOLEAN_TYPE,
-            Boolean.FALSE));
+            Boolean.FALSE),
+        new ProviderConfigProperty(
+            ScimTargetConfig.KEY_RECONCILIATION_ENABLED,
+            "Reconciliation enabled",
+            "Independent kill switch for the periodic background reconciliation pass "
+                + "(self-heals drift from missed events) -- can be turned off without "
+                + "disabling real-time sync. Takes effect on the next scheduled tick.",
+            ProviderConfigProperty.BOOLEAN_TYPE,
+            Boolean.TRUE));
   }
 
   @Override

@@ -116,4 +116,20 @@ class ScimTargetConfigTest {
     var config = new ScimTargetConfig(model);
     assertTrue(config.isSyncEnabled());
   }
+
+  @Test
+  void reconciliationEnabledDefaultsToTrue() {
+    // Independent kill switch (issue #6, pre-mortem): defaults on once sync itself is on,
+    // but can be turned off without disabling real-time event-driven push.
+    var config = new ScimTargetConfig(new ComponentModel());
+    assertTrue(config.isReconciliationEnabled());
+  }
+
+  @Test
+  void reconciliationEnabledHonorsExplicitOptOut() {
+    ComponentModel model = new ComponentModel();
+    model.put(ScimTargetConfig.KEY_RECONCILIATION_ENABLED, false);
+    var config = new ScimTargetConfig(model);
+    assertFalse(config.isReconciliationEnabled());
+  }
 }

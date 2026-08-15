@@ -51,5 +51,6 @@ class ScimTargetStorageProviderFactoryTest {
     assertTrue(names.contains(ScimTargetConfig.KEY_CREDENTIAL_VAULT_REF));
     assertTrue(names.contains(ScimTargetConfig.KEY_DELETE_POLICY));
     assertTrue(names.contains(ScimTargetConfig.KEY_SYNC_ENABLED));
+    assertTrue(names.contains(ScimTargetConfig.KEY_RECONCILIATION_ENABLED));
   }
 }
