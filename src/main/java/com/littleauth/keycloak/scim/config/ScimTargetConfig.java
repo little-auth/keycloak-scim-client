@@ -47,10 +47,27 @@ public class ScimTargetConfig {
   /**
    * How Keycloak deletions map to the SCIM target. Defaults to {@link
    * DeletePolicy#SOFT_DELETE}.
+   *
+   * @throws IllegalArgumentException if more than one value is stored for this field.
+   *     Keycloak's component config is multi-valued by design and nothing at the framework
+   *     level enforces single-value cardinality on a LIST_TYPE field for an Admin REST
+   *     caller (only the Admin Console UI's dropdown happens to submit one value) -- reading
+   *     just the first value would make which policy actually applies depend on JPA
+   *     Set-iteration order, which can differ between this read and a later one of the same
+   *     persisted row, silently letting {@link DeletePolicy#HARD_DELETE} apply at dispatch
+   *     time despite a validate-time read seeing (and accepting as) {@code SOFT_DELETE}.
    */
   public DeletePolicy getDeletePolicy() {
-    String raw = model.get(KEY_DELETE_POLICY);
-    return raw == null ? DeletePolicy.SOFT_DELETE : DeletePolicy.valueOf(raw);
+    List<String> values = model.getConfig().get(KEY_DELETE_POLICY);
+    if (values == null || values.isEmpty()) {
+      return DeletePolicy.SOFT_DELETE;
+    }
+    if (values.size() > 1) {
+      throw new IllegalArgumentException(
+          "Multiple values submitted for " + KEY_DELETE_POLICY + " " + values
+              + " -- exactly one is required.");
+    }
+    return DeletePolicy.valueOf(values.get(0));
   }
 
   public boolean isSyncEnabled() {

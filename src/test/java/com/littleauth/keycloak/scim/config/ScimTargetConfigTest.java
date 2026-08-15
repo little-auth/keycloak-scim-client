@@ -104,6 +104,25 @@ class ScimTargetConfigTest {
     assertEquals(ScimTargetConfig.DeletePolicy.HARD_DELETE, config.getDeletePolicy());
   }
 
+  /**
+   * Keycloak component config is multi-valued by design (MultivaluedHashMap), and nothing
+   * at the framework level rejects submitting more than one value for a field the admin
+   * console's LIST_TYPE dropdown only ever renders as single-select -- an Admin REST caller
+   * can submit deletePolicy: ["SOFT_DELETE", "HARD_DELETE"] directly. Reading only the
+   * first value (Keycloak's ComponentModel.get() default) would make which policy actually
+   * applies depend on JPA Set-iteration order, which can differ between the validate-time
+   * read and a later runtime read of the same row -- letting HARD_DELETE apply at dispatch
+   * time despite validate time seeing (and accepting as) SOFT_DELETE. Must fail loud instead.
+   */
+  @Test
+  void getDeletePolicyThrowsWhenMultipleValuesAreSubmittedForThisSingleValuedField() {
+    ComponentModel model = new ComponentModel();
+    model.getConfig()
+        .put(ScimTargetConfig.KEY_DELETE_POLICY, List.of("SOFT_DELETE", "HARD_DELETE"));
+    var config = new ScimTargetConfig(model);
+    assertThrows(IllegalArgumentException.class, config::getDeletePolicy);
+  }
+
   @Test
   void syncEnabledDefaultsToFalse() {
     var config = new ScimTargetConfig(new ComponentModel());

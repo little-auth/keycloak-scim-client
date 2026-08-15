@@ -155,4 +155,24 @@ class ScimTargetStorageProviderFactoryTest {
 
     assertNull(model.get(ScimTargetConfig.KEY_HARD_DELETE_CONFIRMATION));
   }
+
+  /**
+   * Keycloak's Admin REST API has no cardinality check on component config -- a caller can
+   * submit deletePolicy as a two-element list. Reading only the first value would let this
+   * save through as SOFT_DELETE (skipping the confirmation gate, and worse, clearing any
+   * stored confirmation) while a later runtime read of the same persisted row -- via a
+   * separately reconstructed ComponentModel, subject to unordered Set iteration -- could
+   * see HARD_DELETE instead, hard-deleting SCIM users with the gate never having fired.
+   */
+  @Test
+  void rejectsMultiValuedDeletePolicyEvenWhenTheFirstValueWouldOtherwiseBeSoftDelete() {
+    when(realm.getName()).thenReturn("acme");
+    ComponentModel model = new ComponentModel();
+    model.getConfig()
+        .put(ScimTargetConfig.KEY_DELETE_POLICY, List.of("SOFT_DELETE", "HARD_DELETE"));
+
+    assertThrows(
+        ComponentValidationException.class,
+        () -> factory.validateConfiguration(session, realm, model));
+  }
 }
