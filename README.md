@@ -32,6 +32,10 @@ export JAVA_HOME="$(asdf where java)"
 Produces `target/keycloak-scim-client-<version>.jar`, dropped into Keycloak's
 `providers/` directory.
 
+## Releasing
+
+See [RELEASING.md](RELEASING.md).
+
 ## License
 
 Apache-2.0 — see `LICENSE`.
