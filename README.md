@@ -6,10 +6,11 @@ discovery-driven capability detection, periodic reconciliation), configured thro
 custom admin console tab rather than Keycloak's generic auto-generated provider form.
 
 Replaces [mitodl/keycloak-scim](https://github.com/mitodl/keycloak-scim) for our use with
-[scimitar](https://github.com/mario/scimitar)-based SCIM targets — see that project's
-`keycloak-it` harness for the conformance findings that shaped several decisions here
-(the DELETE-after-row-gone bug, the silent `emailVerified` gate, PATCH-off-by-default)
-and for the disposable SCIM server this project's own conformance tests point at.
+[little-auth-scim](https://github.com/little-auth/little-auth-scim)-based SCIM targets — see
+that project's `keycloak-it` harness for the conformance findings that shaped several
+decisions here (the DELETE-after-row-gone bug, the silent `emailVerified` gate,
+PATCH-off-by-default) and for the disposable SCIM server this project's own conformance
+tests point at.
 
 ## Status
 

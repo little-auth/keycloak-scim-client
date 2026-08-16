@@ -105,7 +105,7 @@ class TargetUrlValidatorTest {
 
   @Test
   void allowlistOverridePermitsPlainHttpForLocalConformanceTarget() {
-    // keycloak-it (mario/scimitar's disposable conformance server) serves plain HTTP --
+    // keycloak-it (little-auth-scim's disposable conformance server) serves plain HTTP --
     // the allowlist is what makes local/CI conformance testing possible at all.
     var validator =
         new TargetUrlValidator(
