@@ -1,9 +1,11 @@
 package com.littleauth.keycloak.scim.config;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -54,6 +56,7 @@ class ScimTargetStorageProviderFactoryTest {
     assertTrue(names.contains(ScimTargetConfig.KEY_AUTH_MODE));
     assertTrue(names.contains(ScimTargetConfig.KEY_USERNAME));
     assertTrue(names.contains(ScimTargetConfig.KEY_RECONCILIATION_ENABLED));
+    assertTrue(names.contains(ScimTargetConfig.KEY_HARD_DELETE_CONFIRMATION));
   }
 
   @Test
@@ -109,5 +112,125 @@ class ScimTargetStorageProviderFactoryTest {
     model.put(ScimTargetConfig.KEY_TARGET_URL, "https://93.184.216.34/scim/v2");
 
     assertDoesNotThrow(() -> factory.validateConfiguration(session, realm, model));
+  }
+
+  /**
+   * Pre-mortem mitigation (#7): HARD_DELETE must not be enableable via a bare toggle --
+   * saving it requires a matching, realm-specific confirmation phrase, enforced here so no
+   * save path (Admin Console UI or Admin REST API) can bypass it.
+   */
+  @Test
+  void rejectsHardDeletePolicyWithoutConfirmationPhrase() {
+    when(realm.getName()).thenReturn("acme");
+    ComponentModel model = new ComponentModel();
+    model.put(ScimTargetConfig.KEY_DELETE_POLICY, "HARD_DELETE");
+
+    assertThrows(
+        ComponentValidationException.class,
+        () -> factory.validateConfiguration(session, realm, model));
+  }
+
+  @Test
+  void rejectsHardDeletePolicyWithWrongConfirmationPhrase() {
+    when(realm.getName()).thenReturn("acme");
+    ComponentModel model = new ComponentModel();
+    model.put(ScimTargetConfig.KEY_DELETE_POLICY, "HARD_DELETE");
+    model.put(ScimTargetConfig.KEY_HARD_DELETE_CONFIRMATION, "ENABLE HARD DELETE");
+
+    assertThrows(
+        ComponentValidationException.class,
+        () -> factory.validateConfiguration(session, realm, model));
+  }
+
+  @Test
+  void acceptsHardDeletePolicyWithExactRealmSpecificConfirmationPhrase() {
+    when(realm.getName()).thenReturn("acme");
+    ComponentModel model = new ComponentModel();
+    model.put(ScimTargetConfig.KEY_DELETE_POLICY, "HARD_DELETE");
+    model.put(ScimTargetConfig.KEY_HARD_DELETE_CONFIRMATION, "ENABLE HARD DELETE FOR ACME");
+
+    assertDoesNotThrow(() -> factory.validateConfiguration(session, realm, model));
+  }
+
+  @Test
+  void softDeletePolicyDoesNotRequireConfirmation() {
+    // DeletePolicy defaults to SOFT_DELETE when unset -- confirmation must never be required.
+    assertDoesNotThrow(
+        () -> factory.validateConfiguration(session, realm, new ComponentModel()));
+  }
+
+  /**
+   * The LIST_TYPE dropdown only constrains the Admin Console UI, not an Admin REST API
+   * caller -- an invalid deletePolicy value must fail as a clean ComponentValidationException,
+   * not an unwrapped IllegalArgumentException from DeletePolicy.valueOf() (which
+   * validateConfiguration's contract doesn't declare and Keycloak won't render as an
+   * actionable admin-facing message).
+   */
+  @Test
+  void rejectsInvalidDeletePolicyValueAsComponentValidationExceptionNotIllegalArgument() {
+    ComponentModel model = new ComponentModel();
+    model.put(ScimTargetConfig.KEY_DELETE_POLICY, "GARBAGE");
+
+    assertThrows(
+        ComponentValidationException.class,
+        () -> factory.validateConfiguration(session, realm, model));
+  }
+
+  /**
+   * Nothing ever cleared a stale, previously-valid confirmation phrase when the policy left
+   * HARD_DELETE, so a later flip back to HARD_DELETE silently re-armed off the leftover
+   * value -- exactly the bare-toggle bypass issue #7 exists to close, just one save later
+   * instead of the first one.
+   */
+  @Test
+  void reEnablingHardDeleteAfterSwitchingAwayRequiresFreshConfirmation() {
+    when(realm.getName()).thenReturn("acme");
+    ComponentModel model = new ComponentModel();
+    model.put(ScimTargetConfig.KEY_DELETE_POLICY, "HARD_DELETE");
+    model.put(ScimTargetConfig.KEY_HARD_DELETE_CONFIRMATION, "ENABLE HARD DELETE FOR ACME");
+    assertDoesNotThrow(() -> factory.validateConfiguration(session, realm, model));
+
+    // A later, unrelated save switches back to SOFT_DELETE -- must always succeed.
+    model.put(ScimTargetConfig.KEY_DELETE_POLICY, "SOFT_DELETE");
+    assertDoesNotThrow(() -> factory.validateConfiguration(session, realm, model));
+
+    // Someone flips back to HARD_DELETE without retyping the confirmation -- the stale
+    // phrase from the earlier save must not silently re-arm it.
+    model.put(ScimTargetConfig.KEY_DELETE_POLICY, "HARD_DELETE");
+    assertThrows(
+        ComponentValidationException.class,
+        () -> factory.validateConfiguration(session, realm, model));
+  }
+
+  @Test
+  void switchingAwayFromHardDeleteClearsTheStoredConfirmationValue() {
+    when(realm.getName()).thenReturn("acme");
+    ComponentModel model = new ComponentModel();
+    model.put(ScimTargetConfig.KEY_DELETE_POLICY, "SOFT_DELETE");
+    model.put(ScimTargetConfig.KEY_HARD_DELETE_CONFIRMATION, "ENABLE HARD DELETE FOR ACME");
+
+    factory.validateConfiguration(session, realm, model);
+
+    assertNull(model.get(ScimTargetConfig.KEY_HARD_DELETE_CONFIRMATION));
+  }
+
+  /**
+   * Keycloak's Admin REST API has no cardinality check on component config -- a caller can
+   * submit deletePolicy as a two-element list. Reading only the first value would let this
+   * save through as SOFT_DELETE (skipping the confirmation gate, and worse, clearing any
+   * stored confirmation) while a later runtime read of the same persisted row -- via a
+   * separately reconstructed ComponentModel, subject to unordered Set iteration -- could
+   * see HARD_DELETE instead, hard-deleting SCIM users with the gate never having fired.
+   */
+  @Test
+  void rejectsMultiValuedDeletePolicyEvenWhenTheFirstValueWouldOtherwiseBeSoftDelete() {
+    when(realm.getName()).thenReturn("acme");
+    ComponentModel model = new ComponentModel();
+    model.getConfig()
+        .put(ScimTargetConfig.KEY_DELETE_POLICY, List.of("SOFT_DELETE", "HARD_DELETE"));
+
+    assertThrows(
+        ComponentValidationException.class,
+        () -> factory.validateConfiguration(session, realm, model));
   }
 }

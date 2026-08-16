@@ -1,8 +1,10 @@
 package com.littleauth.keycloak.scim.config;
 
 import java.util.List;
+import java.util.Locale;
 import org.keycloak.component.ComponentModel;
 import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.RealmModel;
 import org.keycloak.vault.VaultStringSecret;
 
 /**
@@ -25,6 +27,7 @@ public class ScimTargetConfig {
   public static final String KEY_AUTH_MODE = "authMode";
   public static final String KEY_USERNAME = "username";
   public static final String KEY_RECONCILIATION_ENABLED = "reconciliationEnabled";
+  public static final String KEY_HARD_DELETE_CONFIRMATION = "hardDeleteConfirmation";
 
   private final ComponentModel model;
 
@@ -47,9 +50,31 @@ public class ScimTargetConfig {
   /**
    * How Keycloak deletions map to the SCIM target. Defaults to {@link
    * DeletePolicy#SOFT_DELETE}.
+   *
+   * @throws IllegalArgumentException if more than one value is stored for this field.
+   *     Keycloak's component config is multi-valued by design and nothing at the framework
+   *     level enforces single-value cardinality on a LIST_TYPE field for an Admin REST
+   *     caller (only the Admin Console UI's dropdown happens to submit one value) -- reading
+   *     just the first value would make which policy actually applies depend on JPA
+   *     Set-iteration order, which can differ between this read and a later one of the same
+   *     persisted row, silently letting {@link DeletePolicy#HARD_DELETE} apply at dispatch
+   *     time despite a validate-time read seeing (and accepting as) {@code SOFT_DELETE}.
    */
   public DeletePolicy getDeletePolicy() {
-    String raw = model.get(KEY_DELETE_POLICY);
+    List<String> values = model.getConfig().get(KEY_DELETE_POLICY);
+    if (values == null || values.isEmpty()) {
+      return DeletePolicy.SOFT_DELETE;
+    }
+    if (values.size() > 1) {
+      throw new IllegalArgumentException(
+          "Multiple values submitted for " + KEY_DELETE_POLICY + " " + values
+              + " -- exactly one is required.");
+    }
+    // The single stored value can itself be null (e.g. a NULL config row read back from
+    // the database) -- Enum.valueOf(null) throws NullPointerException, not
+    // IllegalArgumentException, which the cardinality check above doesn't guard against
+    // and validateConfiguration's catch(IllegalArgumentException) wouldn't catch either.
+    String raw = values.get(0);
     return raw == null ? DeletePolicy.SOFT_DELETE : DeletePolicy.valueOf(raw);
   }
 
@@ -116,6 +141,31 @@ public class ScimTargetConfig {
                   new IllegalStateException(
                       "SCIM target credential vault reference did not resolve to a value"));
     }
+  }
+
+  /**
+   * The exact phrase an admin must type into {@link #KEY_HARD_DELETE_CONFIRMATION} to enable
+   * {@link DeletePolicy#HARD_DELETE} for the given realm. Embeds the realm's own name so a
+   * single copy-pasted literal can't silently re-enable hard-delete across every realm in an
+   * IaC-managed config -- a global fixed phrase alone doesn't hold up against that (pre-mortem
+   * mitigation, see the implementation ticket).
+   */
+  public static String requiredHardDeleteConfirmationPhrase(RealmModel realm) {
+    // Trimmed like the admin-typed input is (see isHardDeleteConfirmed) -- a realm name
+    // carrying incidental surrounding whitespace must not produce a phrase no trimmed input
+    // could ever match, which would permanently block HARD_DELETE for that realm.
+    return "ENABLE HARD DELETE FOR " + realm.getName().trim().toUpperCase(Locale.ROOT);
+  }
+
+  /**
+   * Whether {@link #KEY_HARD_DELETE_CONFIRMATION} matches the realm-specific phrase required
+   * to enable {@link DeletePolicy#HARD_DELETE} -- the high-friction confirmation gate this
+   * exists for is a bare toggle otherwise. Only whitespace around the value is forgiven; the
+   * phrase itself stays exact-match (case included) by design.
+   */
+  public boolean isHardDeleteConfirmed(RealmModel realm) {
+    String raw = model.get(KEY_HARD_DELETE_CONFIRMATION);
+    return raw != null && requiredHardDeleteConfirmationPhrase(realm).equals(raw.trim());
   }
 
   /** How a Keycloak user delete maps to the SCIM target. */
