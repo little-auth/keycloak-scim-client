@@ -1,7 +1,6 @@
 target/
 *.class
 *.jar
-!.mvn/wrapper/maven-wrapper.jar
 .idea/
 *.iml
 .vscode/
@@ -14,3 +13,4 @@ dependency-reduced-pom.xml
 .claude/
 .DS_Store
 *.log
+.usefinal/

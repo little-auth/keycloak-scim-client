@@ -14,9 +14,7 @@ tests point at.
 
 ## Status
 
-Early, pre-alpha. See `.usefinal/plans/keycloak-scim-client-context.md` for the locked
-architecture decisions and `.usefinal/plans/keycloak-scim-client-implementation.md` for
-current build status.
+Early, pre-alpha.
 
 ## Build
 
