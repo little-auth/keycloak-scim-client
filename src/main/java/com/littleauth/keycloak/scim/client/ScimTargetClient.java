@@ -1,13 +1,20 @@
 package com.littleauth.keycloak.scim.client;
 
 import com.fasterxml.jackson.databind.node.BooleanNode;
+import com.littleauth.keycloak.scim.client.ReconciliationWriteResult.Outcome;
 import com.littleauth.keycloak.scim.config.ScimTargetConfig.DeletePolicy;
 import de.captaingoldfish.scim.sdk.client.ScimRequestBuilder;
+import de.captaingoldfish.scim.sdk.client.builder.UpdateBuilder;
 import de.captaingoldfish.scim.sdk.client.response.ServerResponse;
 import de.captaingoldfish.scim.sdk.common.constants.enums.PatchOp;
+import de.captaingoldfish.scim.sdk.common.etag.ETag;
 import de.captaingoldfish.scim.sdk.common.resources.ServiceProvider;
 import de.captaingoldfish.scim.sdk.common.resources.User;
+import de.captaingoldfish.scim.sdk.common.resources.complex.Meta;
+import de.captaingoldfish.scim.sdk.common.response.ListResponse;
+import java.time.Instant;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Thin orchestration layer over {@code scim-sdk-client}: create/replace/delete Users, plus
@@ -81,6 +88,100 @@ public class ScimTargetClient implements AutoCloseable {
         .sendRequest(authHeaders);
   }
 
+  /** Plain GET of a User resource by its SCIM id. */
+  public ServerResponse<User> getUser(String scimId) {
+    return requestBuilder.get(User.class, USERS_ENDPOINT, scimId).sendRequest(authHeaders);
+  }
+
+  /**
+   * Reconciliation's duplicate-create guard (issue #6): before self-healing a missing
+   * mapping by creating a new resource, check whether one already exists on the target for
+   * this Keycloak user -- closes the window where an event-driven create (N6) and a
+   * reconciliation create for the same user race across two separate transactions, each
+   * observing no mapping yet and each calling create.
+   */
+  public ServerResponse<ListResponse<User>> findByExternalId(String keycloakUserId) {
+    return requestBuilder
+        .list(User.class, USERS_ENDPOINT)
+        .filter(externalIdEqualsFilter(keycloakUserId))
+        .get()
+        .sendRequest(authHeaders);
+  }
+
+  private static String externalIdEqualsFilter(String keycloakUserId) {
+    String escaped = keycloakUserId.replace("\\", "\\\\").replace("\"", "\\\"");
+    return "externalId eq \"" + escaped + "\"";
+  }
+
+  /**
+   * Applies a reconciliation diff-derived full PUT replace, but only after checking the
+   * target's {@code meta.version}/{@code lastModified} hasn't moved since {@code
+   * expectedMeta} was read (issue #6: the N6/N7 race -- an event-driven write landing
+   * between reconciliation's read and its write must not be silently overwritten).
+   *
+   * <p>Whichever signal the original read carried (an ETag {@code meta.version}, or a
+   * {@code lastModified} timestamp when no ETag was advertised), this always re-fetches the
+   * resource immediately before writing and compares client-side -- deliberately not relying
+   * solely on the target enforcing {@code If-Match} server-side: RFC 7644 {@literal $}3.14
+   * only <i>SHOULD</i>s that enforcement, not requires it, so a target that advertises an
+   * ETag but doesn't actually honor conditional requests would otherwise get zero effective
+   * protection, exactly the gap this method exists to close. When an ETag is present it's
+   * also passed as {@code If-Match} for true server-enforced atomicity on a target that does
+   * honor it, on top of the client-side check every target gets; either way a 412/409
+   * response is reported as {@link Outcome#VERSION_CONFLICT} rather than a generic failure.
+   *
+   * <p>This narrows, but -- being a plain read-then-write with no guaranteed server-side
+   * atomicity on a target that doesn't enforce {@code If-Match} -- does not fully eliminate,
+   * the race window; see the implementation ticket's residual-risk note.
+   *
+   * <p>If the original read carried neither signal at all, there is nothing to check
+   * against and the write proceeds unconditionally -- refusing forever would mean a target
+   * with no version/timestamp support could never be self-healed by reconciliation, which
+   * defeats its purpose.
+   *
+   * <p>{@code desired} must already be the full desired resource (built by fetching the
+   * current resource and merging Keycloak-sourced fields onto it -- see {@code
+   * KeycloakUserMapper#mergeOnto} -- never a bare, partially-populated {@code User}, which
+   * would wipe target-only fields via SCIM's full-replace PUT semantics).
+   */
+  public ReconciliationWriteResult replaceIfVersionUnchanged(
+      String scimId, User desired, Meta expectedMeta) {
+    Optional<ETag> expectedVersion = expectedMeta == null ? Optional.empty() : expectedMeta.getVersion();
+    Optional<Instant> expectedLastModified =
+        expectedMeta == null ? Optional.empty() : expectedMeta.getLastModified();
+
+    if (expectedVersion.isPresent() || expectedLastModified.isPresent()) {
+      ServerResponse<User> recheck = getUser(scimId);
+      if (!recheck.isSuccess()) {
+        return new ReconciliationWriteResult(Outcome.FAILED, recheck);
+      }
+      Optional<Meta> currentMeta = recheck.getResource().getMeta();
+      boolean changed =
+          expectedVersion.isPresent()
+              ? !currentMeta.flatMap(Meta::getVersion).equals(expectedVersion)
+              : !currentMeta.flatMap(Meta::getLastModified).equals(expectedLastModified);
+      if (changed) {
+        return new ReconciliationWriteResult(Outcome.VERSION_CONFLICT, recheck);
+      }
+    }
+    // else: the target advertised neither a version nor a timestamp on the original read --
+    // nothing to check against; proceed unconditionally rather than refuse to ever self-heal
+    // this target.
+
+    UpdateBuilder<User> updateBuilder =
+        requestBuilder.update(User.class, USERS_ENDPOINT, scimId).setResource(desired.toString());
+    expectedVersion.ifPresent(updateBuilder::setETagForIfMatch);
+    ServerResponse<User> response = updateBuilder.sendRequest(authHeaders);
+    if (response.isSuccess()) {
+      return new ReconciliationWriteResult(Outcome.APPLIED, response);
+    }
+    Integer status = response.getHttpStatus();
+    if (status != null && (status == 412 || status == 409)) {
+      return new ReconciliationWriteResult(Outcome.VERSION_CONFLICT, response);
+    }
+    return new ReconciliationWriteResult(Outcome.FAILED, response);
+  }
+
   /** Hard DELETE of a User resource; only invoked when the realm is configured for it. */
   public ServerResponse<User> deleteUser(String scimId) {
     return requestBuilder.delete(User.class, USERS_ENDPOINT, scimId).sendRequest(authHeaders);
@@ -122,8 +223,7 @@ public class ScimTargetClient implements AutoCloseable {
   }
 
   private ServerResponse<User> replaceActiveViaFetchAndPut(String scimId, boolean active) {
-    ServerResponse<User> current =
-        requestBuilder.get(User.class, USERS_ENDPOINT, scimId).sendRequest(authHeaders);
+    ServerResponse<User> current = getUser(scimId);
     if (!current.isSuccess()) {
       // Can't safely PUT without the current state -- surface the GET failure rather
       // than risk wiping fields with an incomplete replace.

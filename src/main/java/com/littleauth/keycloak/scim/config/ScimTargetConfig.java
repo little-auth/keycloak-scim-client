@@ -24,6 +24,7 @@ public class ScimTargetConfig {
   public static final String KEY_SYNC_ENABLED = "syncEnabled";
   public static final String KEY_AUTH_MODE = "authMode";
   public static final String KEY_USERNAME = "username";
+  public static final String KEY_RECONCILIATION_ENABLED = "reconciliationEnabled";
 
   private final ComponentModel model;
 
@@ -78,6 +79,17 @@ public class ScimTargetConfig {
    */
   public String getUsername() {
     return model.get(KEY_USERNAME);
+  }
+
+  /**
+   * Independent kill switch for the periodic background reconciliation pass (issue #6
+   * pre-mortem finding: reusing {@link #isSyncEnabled()} alone would mean disabling a
+   * misbehaving reconciliation pass also kills real-time event-driven push). Defaults to
+   * {@code true} -- once an admin has opted into sync at all, reconciliation's self-healing
+   * is on by default, but can be turned off on its own without a deploy.
+   */
+  public boolean isReconciliationEnabled() {
+    return model.get(KEY_RECONCILIATION_ENABLED, true);
   }
 
   /**

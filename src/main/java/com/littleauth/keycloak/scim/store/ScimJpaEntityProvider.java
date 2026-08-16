@@ -8,7 +8,7 @@ public class ScimJpaEntityProvider implements JpaEntityProvider {
 
   @Override
   public List<Class<?>> getEntities() {
-    return List.of(ScimSyncMapping.class);
+    return List.of(ScimSyncMapping.class, ScimReconciliationCheckpoint.class);
   }
 
   @Override

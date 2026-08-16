@@ -53,6 +53,7 @@ class ScimTargetStorageProviderFactoryTest {
     assertTrue(names.contains(ScimTargetConfig.KEY_SYNC_ENABLED));
     assertTrue(names.contains(ScimTargetConfig.KEY_AUTH_MODE));
     assertTrue(names.contains(ScimTargetConfig.KEY_USERNAME));
+    assertTrue(names.contains(ScimTargetConfig.KEY_RECONCILIATION_ENABLED));
   }
 
   @Test
